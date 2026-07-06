@@ -1,91 +1,92 @@
-# Multimodal RAG Hub: Document Layout Parsing & Image Retrieval Engine
+# Simple Multimodal RAG Agent Platform
 
-An enterprise-grade, local-first Multimodal Retrieval-Augmented Generation (RAG) system built with **IBM's Docling v2**, **BM25 exact match indexing**, and **Hugging Face cloud inference**. 
-
-This system breaks down the traditional "unstructured data problem" by visually parsing complex document structures (PDFs, Word files, Excel spreadsheets, ZIP archives) into clean Markdown, isolating embedded visual elements (charts, tables, diagrams), and tracking them cleanly in an in-memory lexical keyword index.
+A localized, high-fidelity Retrieval-Augmented Generation (RAG) system optimized for technical documents, textbooks, and sheets. It parses complex files into structured Markdown layouts, indexes them into a native SQLite FTS5 search engine, and generates contextual engineering answers using a localized `llama3.2` instance.
 
 ---
 
-## 🚀 Architectural Advantages
+## 🏗️ Architecture Blueprint
 
-1. **Vision-Driven Layout Analysis**: Leverages `Docling`'s deep-learning computer vision engines to preserve reading order, multi-column articles, and nested structures.
-2. **Deterministic Table & Image Extraction**: Extracts embedded figures, diagrams, and complex financial matrices directly from byte streams, assigning text-based semantic caption weights to them.
-3. **Lexical Retrieval Engine (BM25)**: Bypasses dense vector database server overhead and memory limitations ($TF-IDF$ Term-Frequency constraints) by storing inverted keyword indices natively in system volatile RAM.
-4. **Multimodal State Matching**: When a keyword query points to data inside a chart, the BM25 engine surfaces the descriptive context placeholder, streaming the exact visual image buffer straight to your user UI layout.
-
----
-
-## 🛠️ System Design Topology
-
-* **Frontend Dashboard**: Streamlit (Python Interactive Web Engine Layout).
-* **Ingestion Layer**: In-Memory Byte Decompression (`zipfile`, `io.BytesIO`) combined with `Docling v2 HybridChunker`.
-* **Search Core**: `rank_bm25` (Statistical Exact Term Frequency Matching).
-* **Inference Model**: Meta `Llama-3-8B-Instruct` (Hosted on Hugging Face Serverless API Hub).
+* **Document Parsing Engine:** Converts raw assets into layout-aware Markdown representations, preserving grids, code listings, and tables seamlessly.
+* **Search Infrastructure:** Utilizes a lightweight, ultra-fast native SQLite FTS5 index combined with BM25 keyword rankings to extract context in milliseconds.
+* **LLM Engine:** Orchestrated locally via Ollama (`llama3.2`) to protect intellectual boundaries and guarantee zero data leaks.
 
 ---
 
-## 📥 Prerequisites & Environment Setup
+## 🐳 Option 1: Running Fully Containerized (Using Docker)
 
-Ensure you have Python 3.10 or greater installed locally on your system.
+Use this method to run your database pipeline, application UI, and AI models fully self-contained inside isolated Docker environments.
 
-### 1. Clone the Repository Workspace
-```bash
-git clone [https://github.com/yourusername/multimodal-rag-vault.git](https://github.com/yourusername/multimodal-rag-vault.git)
-cd multimodal-rag-vault
+### Step 1: Ensure Prerequisites are Met
+1. Install [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/).
+2. Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) if utilizing an active discrete GPU layout.
+
+### Step 2: Configure Application Files
+Ensure your project contains a standard default `Dockerfile` and your revised `docker-compose.yml`.
+
+### Step 3: Spin Up Infrastructure
+Open your terminal inside the `D:\simple_agent` root workspace directory and execute:
+```powershell
+# Bring down existing containers and clean stale references
+docker compose down
+
+# Force rebuild application layers and boot detached containers
+docker compose up --build -d
 ```
-### 2. Set Up a Python Virtual Environment
-``` bash
-# Windows
+### Step 4: Validate Download Matrix
+The background engine will execute entrypoint.sh automatically to fetch your parameters. Watch the live download layer stream using:
+```powershell
+docker logs -f ollama_service
+```
+Once the terminal outputs Model initialization complete!, navigate your web browser to http://localhost:8501 to access your dashboard interface.
+
+## 💻 Option 2: Running Locally
+Use this option to run the Python application scripts and Ollama directly on your host machine bare-metal, bypassing Docker entirely.
+
+### Step 1: Install and Run Ollama Locally on Windows
+1. Download the official native installer: Ollama for Windows Installer.
+
+2. Run the executable file (OllamaSetup.exe) and proceed through the basic wizard layout steps.
+
+3. Once fully installed, verify that the application background engine daemon is running (look for the Ollama icon in your Windows taskbar tray).
+
+4. Open a fresh PowerShell window on your host computer and pull the llama3.2 model parameters into your local storage matrix:
+
+```powershell 
+ollama pull llama3.2
+```
+5. Test that the local engine responds instantly by issuing a quick verification query:
+```powershell
+ollama run llama3.2 "Say hello!"
+```
+
+### Step 2: Set Up Local Python Virtual Environment
+Open a dedicated terminal (cmd or PowerShell or teminal based on os) and went to this project directory
+``` powershell
+# 1. Initialize a localized clean Python environment isolation block
 python -m venv .venv
-.venv\Scripts\activate
 
-# macOS / Linux
-python3 -m venv .venv
-source .venv/bin/activate
+# 2. Activate the workspace scope window state
+# On PowerShell:
+.\.venv\Scripts\Activate.ps1
+# On classic Command Prompt (CMD):
+.\.venv\Scripts\activate.bat
+
+# 3. Upgrade basic pip installer layers
+python -m pip install --upgrade pip
+
+# 4. Install standard layout framework packages and dependencies
+pip install -r requirements.txt
 ```
-
-### 3. Install Required Dependencies.
-Install Pre-requistics requirement
-```bash
-pip install -r requirments.txt
+### Step 3: Configure Environment Routing Variables
+Tell your local code application to look at your native Windows machine engine loop instead of network container clusters. Create or update your local .env configuration file inside
 ```
-
-### 4. 💻 Run Execution Configuration
-``` bash
+OLLAMA_BASE_URL=http://localhost:11434
+```
+### Step 4: Boot the Streamlit UI Dashboard Interface
+With your virtual environment activated, boot up your presentation interface from the command line:
+```powershell
 streamlit run app_ui.py
 ```
+Your system will automatically launch a secure local host browser tab running at http://localhost:8501. You can now modify document parsing variables, clear underlying cache partitions, and verify text lookups natively without container virtualization delays.
 
-
-📖 Operational Guide
-Authentication Access: Paste your personal Hugging Face User Access Token (hf_...) into the designated masked password input box located inside the left sidebar panel menu.
-
-Chunk Constraint Budgeting: Adjust the Max Target Tokens Per Chunk slider (default: 400 tokens). This uses Docling's HybridChunker token-boundary engine to prevent structural sentences or data cells from getting clipped mid-string.
-
-Ingest Documentation Data:
-
-Drop individual files directly (.pdf, .docx, .xlsx, .csv, .txt, .md).
-
-Alternatively, drop a single compressed .zip bundle. The pipeline unzips the files strictly in memory and iterates over the inner contents automatically.
-
-Interact & Debug: Submit inquiries via the main prompt line. If search criteria variables match text written inside or near a PDF corporate diagram, the engine displays the Llama-3 synthesis text response and renders the underlying extracted charts side-by-side on your dashboard. Expand the system debugging toggle to review exact algorithmic scores.
-
-⚠️ Important Implementation Notes: Troubleshooting Docling v2 Moving Imports
-If your system displays an ImportError on initial startup regarding PdfPipelineOptions, verify that your app_ui.py matches the updated Docling v2 core specification guidelines where the structural configuration namespaces have been decoupled from the primary layout engine:
-
-``` bash
-# ❌ DEPRECATED IN V1.X (Will throw terminal errors)
-# from docling.document_converter import DocumentConverter, PdfPipelineOptions
-
-#   CORRECT V2.X SYSTEM CONFIGURATION BLUEPRINT
-from docling.document_converter import DocumentConverter
-from docling.datamodel.pipeline_options import PdfPipelineOptions, PipelineOptions
-from docling.datamodel.base_models import InputFormat
-
-# Instantiate configuration values dynamically via internal property dots
-pipeline_options = PipelineOptions()
-pipeline_options.pdf_options.images_scale = 1.0  # Force exact image capture scaling
-
-```
-
-🤝 Contribution Guidelines
-For architectural enhancements, pull requests, or database state tracking modifications, please open an issue thread detailing your optimization proposal.
+![Running Video](simple_agent_demo.gif)

@@ -1,0 +1,44 @@
+services:
+  # Automated local AI execution engine
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_service
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_NUM_PARALLEL=1       # Strictly limits concurrent streams
+      - OLLAMA_KEEP_ALIVE=5m        # Keeps the model cached in memory
+    volumes:
+      - ollama_storage:/root/.ollama
+      # Mount the entrypoint script into the container workspace
+      - ./entrypoint.sh:/entrypoint.sh
+    # Execute the script on startup to auto-download model matrices
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # Streamlit Presentation Interface Dashboard Layer
+  frontend_ui:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: streamlit_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama_service:11434  
+    volumes:
+      - ./processed_data:/app/processed_data  # Keeps your SQLite RAG database local and viewable
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_storage:

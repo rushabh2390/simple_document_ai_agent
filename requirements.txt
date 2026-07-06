@@ -12,6 +12,6 @@ rank_bm25>=0.2.2
 # --- Frontend UI Core ---
 langchain-huggingface>=0.0.1
 streamlit>=1.32.0
-
+langchain_ollama
 # --- File Decompression & Memory Handling (Built-in Python, No pip installation needed) ---
 # io, zipfile, os, re
