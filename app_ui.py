@@ -59,7 +59,7 @@ with st.sidebar:
     if st.button("🧹 Wipe Index Matrix", use_container_width=True):
         db_engine.wipe_all_data()
         st.success("Internal database state registers flushed!")
-        st.rerun()
+        # st.rerun()
 
 # --- INGESTION VIEW PANEL ---
 st.subheader("📂 Ingestion Vault")
