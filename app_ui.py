@@ -38,6 +38,12 @@ def initialize_rag_services():
 
 parser_engine, db_engine = initialize_rag_services()
 
+# Initialize Chat History and Structural Evidence Cache
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "last_matched_nodes" not in st.session_state:
+    st.session_state.last_matched_nodes = []
+
 # --- SIDEBAR CONTROL PANEL ---
 with st.sidebar:
     st.header("⚙️ App Settings")
@@ -54,13 +60,49 @@ with st.sidebar:
 
     if chunk_overlap >= chunk_size:
         st.error("⚠️ Overlap cannot be greater than or equal to total Chunk Size.")
+    
+    st.subheader("🎛️ Model & Retrieval Hyperparameters")
+    
+    # 1. RETRIEVAL LIMIT SLIDER (Controls SQLite DB output)
+    retrieval_top_k = st.slider(
+        label="Retrieval Chunks (Database Top-K)",
+        min_value=1,
+        max_value=10,
+        value=3,  # Default to 3 chunks
+        step=1,
+        help="Controls the exact number of context chunks retrieved from the SQLite index."
+    )
+    
+    # 2. GENERATION TEMPERATURE SLIDER
+    generation_temperature = st.slider(
+        label="Generation Temperature",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.0,      
+        step=0.1,
+        help="Lower values are precise/deterministic; higher values are more creative."
+    )
+
+    # 3. GENERATION TOP-K SLIDER
+    generation_top_k = st.slider(
+        label="Generation Top-K Selection Window",
+        min_value=1,
+        max_value=100,
+        value=40,
+        step=1,
+        help="Limits the LLM text generation pool to only the top K highest-probability tokens."
+    )
 
     st.markdown("---")
     if st.button("🧹 Wipe Index Matrix", use_container_width=True):
         db_engine.wipe_all_data()
         st.success("Internal database state registers flushed!")
-        # st.rerun()
+        st.rerun()
 
+    if st.button("🗑️ Clear Chat History", use_container_width=True):
+        st.session_state.chat_history = []
+        st.session_state.last_matched_nodes = []
+        st.rerun()
 # --- INGESTION VIEW PANEL ---
 st.subheader("📂 Ingestion Vault")
 uploaded_files = st.file_uploader(
@@ -96,16 +138,25 @@ st.markdown("---")
 
 # --- QUERY & PRESENTATION SCREEN ---
 st.subheader("💬 Ask Your Documents")
+
+# Render historical chats from session memory
+for msg in st.session_state.chat_history:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
 user_query = st.text_input(
     "Enter query:", placeholder="e.g., Explain tensor with example from the book")
 
 if user_query:
+    st.session_state.chat_history.append({"role": "user", "content": user_query})
     with st.spinner("Scanning cross-linked database matrices"):
         # 1. Retrieve text nodes using the updated synchronous BM25 engine
-        matched_nodes = db_engine.search_bm25(user_query, limit=3)
-
+        matched_nodes = db_engine.search_bm25(user_query, limit=retrieval_top_k)
+        st.session_state.last_matched_nodes = matched_nodes
         if not matched_nodes:
             st.warning("No matching context found.")
+            answer = "I've scanned the database but couldn't locate relevant textual evidence to answer your query safely."
+            st.session_state.chat_history.append({"role": "assistant", "content": answer})
         else:
             logger.info("### 🔍 System Debug: Content passing to LLM")
             logger.info(f"{matched_nodes}")
@@ -133,14 +184,14 @@ if user_query:
                 )
                 response = llm.invoke(messages)
                 answer = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+                st.session_state.chat_history.append({"role": "assistant", "content": answer})
             except Exception as err:
                 answer = f"[Ollama Connection Error]: {err}"
                 # Pass the structured messages array instead of the raw string
                 response = llm.invoke(messages)
                 answer = response.content.strip() if hasattr(
                     response, 'content') else str(response).strip()
-            except Exception as err:
-                answer = f"[Ollama Connection Error]: Make sure Ollama is open. Details: {err}"
+                st.session_state.chat_history.append({"role": "assistant", "content": answer})
 
             # Render Response Panel
             st.markdown("### 🎯 System Synthesis Answer")
@@ -178,3 +229,32 @@ if user_query:
                         if not match.get("table_path") and not match.get("image_path"):
                             st.write(
                                 "💡 *No supplementary visual assets mapped to this section context.*")
+
+# --- PERSISTENT EVIDENCE MONITOR (Renders below current active chat frame) ---
+if st.session_state.last_matched_nodes:
+    st.markdown("### 📄 Extracted Structural Evidence (Last Query)")
+    for index, match in enumerate(st.session_state.last_matched_nodes):
+        score_val = match.get("score", 0.0)
+        with st.expander(f"Match #{index + 1} | File: {match['filename']} (Score Weight: {score_val:.4f})", expanded=True):
+            col_txt, col_media = st.columns([3, 2])
+
+            with col_txt:
+                st.markdown("**Text Fragment Context:**")
+                st.write(match["text"])
+                st.caption(f"Chunk Identification ID: `{match['chunk_id']}`")
+
+            with col_media:
+                if match.get("table_path") and os.path.exists(match["table_path"]):
+                    try:
+                        df = pd.read_csv(match["table_path"])
+                        st.markdown("**📊 Accompanying Data Matrix:**")
+                        st.dataframe(df, use_container_width=True)
+                    except Exception as table_err:
+                        st.caption(f"Table context present but unreadable: {table_err}")
+
+                if match.get("image_path") and os.path.exists(match["image_path"]):
+                    st.markdown("**🖼️ Mapped Diagram Crop Reference:**")
+                    st.image(match["image_path"], use_container_width=True)
+
+                if not match.get("table_path") and not match.get("image_path"):
+                    st.write("💡 *No supplementary visual assets mapped to this section context.*")
