@@ -1,17 +1,37 @@
+# =====================================================================
+# 1. Hardware Index Pointer (Forces CUDA-Accelerated GPU Compilation)
+# =====================================================================
+--index-url https://download.pytorch.org/whl/cu121
+
+# =====================================================================
+# 2. Deep Core Framework Dependencies (Explicitly Named to Lock Versioning)
+# =====================================================================
+torch
+torchvision
+torchaudio
+
+# =====================================================================
+# 3. Backend, Routing, & Embedding Orchestration
+# =====================================================================
 fastapi
 uvicorn
-langchain-community
-pypdf
-langchain-chroma
 python-dotenv
-sentence-transformers
 pydantic
-langchain 
+langchain
+langchain-community
+langchain-chroma
+langchain-huggingface>=0.0.1
+langchain_ollama
+sentence-transformers
+
+# =====================================================================
+# 4. Multi-Modal Content Ingestion & Slicing Matrix
+# =====================================================================
+pypdf
 docling>=2.0.0
 rank_bm25>=0.2.2
-# --- Frontend UI Core ---
-langchain-huggingface>=0.0.1
+
+# =====================================================================
+# 5. Frontend Presentation Layer
+# =====================================================================
 streamlit>=1.32.0
-langchain_ollama
-# --- File Decompression & Memory Handling (Built-in Python, No pip installation needed) ---
-# io, zipfile, os, re

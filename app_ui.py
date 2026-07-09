@@ -2,259 +2,219 @@ import streamlit as st
 import os
 import pandas as pd
 from pathlib import Path
-from langchain_ollama import ChatOllama
 from dotenv import load_dotenv
 import logging
-# Hook directly into your modular back-end core files
+
+# Import core modular modules
 from document_parser import MultiModalDocumentParser
 from database_manager import RAGDatabaseManager
-from langchain_core.messages import SystemMessage, HumanMessage
+from agent_engine import agent_app  # Import our newly constructed LangGraph machine
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("RAGAi")
 
 load_dotenv()
-st.set_page_config(page_title="Multi-Modal Knowledge Vault UI",
-                   page_icon="🖼️", layout="wide")
-st.title("🖼️ Docling + SQLite Multimodal RAG Hub")
+st.set_page_config(page_title="Multi-Modal Knowledge Vault UI", page_icon="🤖", layout="wide")
+st.title("🤖 LangGraph Multimodal AI Agent Hub")
 
-# Global Configuration Data Paths
 STATIC_ASSET_DIR = "./processed_data"
 os.makedirs(STATIC_ASSET_DIR, exist_ok=True)
 ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-# Cache services across browser hot-reloads so they stay stable
-
-
 @st.cache_resource
 def initialize_rag_services():
-    parser = MultiModalDocumentParser(
-        base_output_dir=STATIC_ASSET_DIR, batch_size=3)
-    db_manager = RAGDatabaseManager(
-        db_path=os.path.join(STATIC_ASSET_DIR, "rag_storage.db"))
+    parser = MultiModalDocumentParser(base_output_dir=STATIC_ASSET_DIR, batch_size=3)
+    db_manager = RAGDatabaseManager(db_path=os.path.join(STATIC_ASSET_DIR, "rag_storage.db"))
     return parser, db_manager
-
 
 parser_engine, db_engine = initialize_rag_services()
 
-# Initialize Chat History and Structural Evidence Cache
+# Keep persistent historical state intact across continuous slider re-renders
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-if "last_matched_nodes" not in st.session_state:
-    st.session_state.last_matched_nodes = []
-
+if "inspected_nodes" not in st.session_state:
+    st.session_state.inspected_nodes = []
+st.markdown(
+    """
+    <style>
+    /* Force completely dark style properties onto text containers */
+    .stCodeBlock {
+        background-color: #161b26 !important;
+    }
+    div[data-testid="stExpander"] {
+        background-color: #161b26 !important;
+        border: 1px solid #2d3748 !important;
+    }
+    div[data-testid="stChatMessage"] {
+        background-color: #111827 !important;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        padding: 15px;
+    }
+    /* Subtle neon glow for your agent's reasoning loop card */
+    div[data-testid="stStatusWidget"] {
+        background-color: #161b26 !important;
+        border: 1px solid #10b981 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 # --- SIDEBAR CONTROL PANEL ---
 with st.sidebar:
-    st.header("⚙️ App Settings")
-    st.caption("Active Configuration: **(SQLite)**")
-    st.caption("Target Model: `llama3.2`")
-
+    st.header("⚙️ Agent Settings")
+    st.caption("Orchestrator framework: **LangGraph State Machine**")
+    
     st.markdown("---")
     st.subheader("✂️ Chunking Hyperparameters")
-    # Custom sliders to tune document chunk sizes dynamically
-    chunk_size = st.slider("Max Chunk Size (Characters)",
-                           min_value=200, max_value=3000, value=1000, step=100)
-    chunk_overlap = st.slider("Chunk Overlap Block",
-                              min_value=0, max_value=500, value=200, step=20)
-
-    if chunk_overlap >= chunk_size:
-        st.error("⚠️ Overlap cannot be greater than or equal to total Chunk Size.")
+    chunk_size = st.slider("Max Chunk Size", min_value=200, max_value=3000, value=1000, step=100)
+    chunk_overlap = st.slider("Chunk Overlap Block", min_value=0, max_value=500, value=200, step=20)
     
-    st.subheader("🎛️ Model & Retrieval Hyperparameters")
-    
-    # 1. RETRIEVAL LIMIT SLIDER (Controls SQLite DB output)
-    retrieval_top_k = st.slider(
-        label="Retrieval Chunks (Database Top-K)",
-        min_value=1,
-        max_value=10,
-        value=3,  # Default to 3 chunks
-        step=1,
-        help="Controls the exact number of context chunks retrieved from the SQLite index."
-    )
-    
-    # 2. GENERATION TEMPERATURE SLIDER
-    generation_temperature = st.slider(
-        label="Generation Temperature",
-        min_value=0.0,
-        max_value=1.0,
-        value=0.0,      
-        step=0.1,
-        help="Lower values are precise/deterministic; higher values are more creative."
-    )
-
-    # 3. GENERATION TOP-K SLIDER
-    generation_top_k = st.slider(
-        label="Generation Top-K Selection Window",
-        min_value=1,
-        max_value=100,
-        value=40,
-        step=1,
-        help="Limits the LLM text generation pool to only the top K highest-probability tokens."
-    )
+    st.markdown("---")
+    st.subheader("🎛️ Agent Model Parameters")
+    retrieval_top_k = st.slider("Database Chunks (Retrieval K)", min_value=1, max_value=10, value=3, step=1)
+    generation_temperature = st.slider("Generation Temperature", min_value=0.0, max_value=1.0, value=0.0, step=0.1)
+    generation_top_k = st.slider("Generation Top-K Window", min_value=1, max_value=100, value=40, step=1)
 
     st.markdown("---")
-    if st.button("🧹 Wipe Index Matrix", use_container_width=True):
+    if st.button("Wipe Index Matrix", use_container_width=True):
         db_engine.wipe_all_data()
-        st.success("Internal database state registers flushed!")
+        st.success("Internal state matrices flushed!")
+    if st.button("Clear Conversation", use_container_width=True):
+        st.session_state.chat_history = []
+        st.session_state.inspected_nodes = []
         st.rerun()
 
-    if st.button("🗑️ Clear Chat History", use_container_width=True):
-        st.session_state.chat_history = []
-        st.session_state.last_matched_nodes = []
-        st.rerun()
-# --- INGESTION VIEW PANEL ---
+# --- INGESTION VAULT PANEL ---
 st.subheader("📂 Ingestion Vault")
 uploaded_files = st.file_uploader(
-    "Upload multi-format reports (.pdf, .docx, .xlsx, .csv, .md, .txt):",
-    type=["pdf", "docx", "xlsx", "csv", "md", "txt"],
-    accept_multiple_files=True
+    "Upload files:", type=["pdf", "docx", "xlsx", "csv", "md", "txt"], accept_multiple_files=True
 )
 
 if uploaded_files and st.button("🚀 Build Knowledge Base Index", use_container_width=True):
     for uploaded_file in uploaded_files:
-        with st.spinner(f"Ingesting & extracting layouts from: {uploaded_file.name}..."):
+        with st.spinner(f"Parsing layouts: {uploaded_file.name}..."):
             try:
-                file_bytes = uploaded_file.getvalue()
-                # Passing custom slider parameters directly downstream to your parser engine
                 chunks = parser_engine.parse_file(
-                    file_bytes,
-                    uploaded_file.name,
-                    chunk_size=chunk_size,
-                    chunk_overlap=chunk_overlap
+                    uploaded_file.getvalue(), uploaded_file.name, chunk_size=chunk_size, chunk_overlap=chunk_overlap
                 )
-
                 if chunks:
-                    db_engine.insert_document_chunks(
-                        chunks, uploaded_file.name)
+                    db_engine.insert_document_chunks(chunks, uploaded_file.name)
                     st.success(f"Indexed: {uploaded_file.name} successfully!")
-                else:
-                    st.error(
-                        f"No valid text paths found in {uploaded_file.name}.")
             except Exception as ex:
                 st.error(f"Failed parsing {uploaded_file.name}: {str(ex)}")
 
 st.markdown("---")
 
-# --- QUERY & PRESENTATION SCREEN ---
-st.subheader("💬 Ask Your Documents")
+# --- TWO-COLUMN WORKSPACE FRAME (Left=Chat, Right=Asset Inspector) ---
+chat_canvas, asset_inspector = st.columns([3, 2], gap="large")
 
-# Render historical chats from session memory
-for msg in st.session_state.chat_history:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+with chat_canvas:
+    st.subheader("💬 Active Conversation Space")
+    chat_container = st.container(height=500, border=True)
+    
+    with chat_container:
+        for msg in st.session_state.chat_history:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
 
-user_query = st.text_input(
-    "Enter query:", placeholder="e.g., Explain tensor with example from the book")
+    if user_query := st.chat_input("Message your local knowledge agent..."):
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(user_query)
+        st.session_state.chat_history.append({"role": "user", "content": user_query})
+        
+        # Prepare the conversation payload state
+        langgraph_messages = []
+        for m in st.session_state.chat_history:
+            role_tag = "user" if m["role"] == "user" else "assistant"
+            langgraph_messages.append((role_tag, m["content"]))
+            
+        # Configure dynamic graph parameter routing dictionary
+        agent_config = {
+            "configurable": {
+                "db_manager": db_engine,
+                "retrieval_limit": retrieval_top_k,
+                "ollama_base_url": ollama_base_url,
+                "temperature": generation_temperature,
+                "top_k": generation_top_k
+            }
+        }
 
-if user_query:
-    st.session_state.chat_history.append({"role": "user", "content": user_query})
-    with st.spinner("Scanning cross-linked database matrices"):
-        # 1. Retrieve text nodes using the updated synchronous BM25 engine
-        matched_nodes = db_engine.search_bm25(user_query, limit=retrieval_top_k)
-        st.session_state.last_matched_nodes = matched_nodes
-        if not matched_nodes:
-            st.warning("No matching context found.")
-            answer = "I've scanned the database but couldn't locate relevant textual evidence to answer your query safely."
-            st.session_state.chat_history.append({"role": "assistant", "content": answer})
-        else:
-            logger.info("### 🔍 System Debug: Content passing to LLM")
-            logger.info(f"{matched_nodes}")
-            # 2. Reconstruct context cleanly without special tokens
-            context_str = "\n\n".join([f"[Source: {m['filename']}]\n{m['text']}" for m in matched_nodes])
-            # Use explicit LangChain Message formats to guarantee structural delivery
+        with chat_container:
+            with st.chat_message("assistant"):
+                # Initialize our status container for tool tracking
+                with st.status("🧠 Agent Evaluating & Planning...", expanded=True) as status:
+                    st.write("Initializing state nodes...")
+                    
+                    # 1. Use .stream() instead of .invoke() to get fine-grained graph updates
+                    # we specify stream_mode="values" to track state content updates continuously
+                    stream_generator = agent_app.stream(
+                        {"messages": langgraph_messages}, 
+                        config=agent_config,
+                        stream_mode="values"
+                    )
+                    
+                    # We will collect the execution payloads as the graph processes them
+                    final_state = None
+                    for market_chunk in stream_generator:
+                        final_state = market_chunk
+                        # If a tool call has been packed into the latest message, show it live
+                        if "messages" in market_chunk and market_chunk["messages"]:
+                            last_msg = market_chunk["messages"][-1]
+                            if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                                st.write(f"⚙️ **Invoked Tool**: `search_knowledge_base` with query: *\"{last_msg.tool_calls[0]['args']['query']}\"*")
+                    
+                    status.update(label="✅ Execution Path Complete", state="complete")
+                
+                # 2. Render real-time token streaming onto the chat canvas
+                # st.write_stream accepts any generator yielding strings and handles the UI updates perfectly
+                response_placeholder = st.empty()
+                
+                def token_streamer():
+                    # Extract messages from the terminal graph node state
+                    messages_list = final_state.get("messages", []) if final_state else []
+                    if messages_list:
+                        last_message = messages_list[-1]
+                        # Stream the contents if the object has stream capabilities
+                        if hasattr(last_message, "content"):
+                            # Split into words/tokens mock chunk or yield clean chunks
+                            yield last_message.content.strip()
+                        else:
+                            yield str(last_message).strip()
 
-            messages = [
-                SystemMessage(content=(
-                    "You are an expert technical assistant. Answer the user's query by leveraging the provided document context below. "
-                    "Provide thorough explanations, comprehensive details, and fully fleshed-out code implementations or text summaries where requested.\n\n"
-                    f"--- DOCUMENT CONTEXT ---\n{context_str}"
-                )),
-                HumanMessage(content=user_query)
-            ]
+                # Stream the finalized answer instantly with typewriter effects
+                final_response = response_placeholder.write_stream(token_streamer())
+                
+                # Append the finalized string payload back to historical view storage
+                st.session_state.chat_history.append({"role": "assistant", "content": final_response})
+                
+                # Fetch recent nodes directly from our live lookup to update asset inspector panel instantly
+                st.session_state.inspected_nodes = db_engine.search_bm25(user_query, limit=retrieval_top_k)
+                st.rerun()
 
-            # 3. Request inference natively via ChatOllama
-            try:
-                llm = ChatOllama(
-                    base_url=ollama_base_url, 
-                    model="llama3.2", 
-                    temperature=0.3,       # Slightly increased from 0.1 to let it write code fluidly
-                    num_ctx=8192,          # Large reading context window 
-                    num_predict=2048       # Forces Ollama to allow up to 2048 tokens of output response text/code
-                )
-                response = llm.invoke(messages)
-                answer = response.content.strip() if hasattr(response, 'content') else str(response).strip()
-                st.session_state.chat_history.append({"role": "assistant", "content": answer})
-            except Exception as err:
-                answer = f"[Ollama Connection Error]: {err}"
-                # Pass the structured messages array instead of the raw string
-                response = llm.invoke(messages)
-                answer = response.content.strip() if hasattr(
-                    response, 'content') else str(response).strip()
-                st.session_state.chat_history.append({"role": "assistant", "content": answer})
-
-            # Render Response Panel
-            st.markdown("### 🎯 System Synthesis Answer")
-            st.info(answer)
-
-            st.markdown("### 📄 Extracted Structural Evidence")
-            for index, match in enumerate(matched_nodes):
-                # Safe checking for scores since returns flat metrics
-                score_val = match.get("score", 0.0)
-                with st.expander(f"Match #{index + 1} | File: {match['filename']} (Score Weight: {score_val:.4f})", expanded=True):
-                    col_txt, col_media = st.columns([3, 2])
-
-                    with col_txt:
-                        st.markdown("**Text Fragment Context:**")
-                        st.write(match["text"])
-                        st.caption(
-                            f"Chunk Identification ID: `{match['chunk_id']}`")
-
-                    with col_media:
-                        if match.get("table_path") and os.path.exists(match["table_path"]):
-                            try:
-                                df = pd.read_csv(match["table_path"])
-                                st.markdown("**📊 Accompanying Data Matrix:**")
-                                st.dataframe(df, use_container_width=True)
-                            except Exception as table_err:
-                                st.caption(
-                                    f"Table context present but unreadable: {table_err}")
-
-                        if match.get("image_path") and os.path.exists(match["image_path"]):
-                            st.markdown(
-                                "**🖼️ Mapped Diagram Crop Reference:**")
-                            st.image(match["image_path"],
-                                     use_container_width=True)
-
-                        if not match.get("table_path") and not match.get("image_path"):
-                            st.write(
-                                "💡 *No supplementary visual assets mapped to this section context.*")
-
-# --- PERSISTENT EVIDENCE MONITOR (Renders below current active chat frame) ---
-if st.session_state.last_matched_nodes:
-    st.markdown("### 📄 Extracted Structural Evidence (Last Query)")
-    for index, match in enumerate(st.session_state.last_matched_nodes):
-        score_val = match.get("score", 0.0)
-        with st.expander(f"Match #{index + 1} | File: {match['filename']} (Score Weight: {score_val:.4f})", expanded=True):
-            col_txt, col_media = st.columns([3, 2])
-
-            with col_txt:
-                st.markdown("**Text Fragment Context:**")
-                st.write(match["text"])
-                st.caption(f"Chunk Identification ID: `{match['chunk_id']}`")
-
-            with col_media:
+# --- RIGHT HAND SIDEBAR ASSET INSPECTOR ---
+with asset_inspector:
+    st.subheader("🔍 Context & Asset Inspector")
+    if st.session_state.inspected_nodes:
+        st.caption("Active Visual Evidence mapped to your text context by the agent tool:")
+        for index, match in enumerate(st.session_state.inspected_nodes):
+            with st.container(border=True):
+                st.markdown(f"📄 **Hit #{index + 1}** | `{match['filename']}`")
+                with st.expander("🔬 View Text Context"):
+                    st.write(match["text"])
+                    
                 if match.get("table_path") and os.path.exists(match["table_path"]):
                     try:
                         df = pd.read_csv(match["table_path"])
-                        st.markdown("**📊 Accompanying Data Matrix:**")
-                        st.dataframe(df, use_container_width=True)
-                    except Exception as table_err:
-                        st.caption(f"Table context present but unreadable: {table_err}")
-
+                        st.markdown("📊 **Associated Tabular Data Matrix:**")
+                        st.dataframe(df, use_container_width=True, hide_index=True)
+                    except Exception as t_err:
+                        st.caption(f"Table reference present but unreadable: {t_err}")
+                        
                 if match.get("image_path") and os.path.exists(match["image_path"]):
-                    st.markdown("**🖼️ Mapped Diagram Crop Reference:**")
+                    st.markdown("🖼️ **Mapped Diagram/Crop Asset:**")
                     st.image(match["image_path"], use_container_width=True)
-
-                if not match.get("table_path") and not match.get("image_path"):
-                    st.write("💡 *No supplementary visual assets mapped to this section context.*")
+    else:
+        st.info("💡 Any extracted tables or diagram layouts selected by the LangGraph agent tool will stack right here.")

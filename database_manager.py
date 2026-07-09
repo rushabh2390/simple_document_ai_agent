@@ -4,6 +4,8 @@ import re
 import logging
 from pathlib import Path
 from typing import List, Dict, Any
+from langchain_core.tools import tool
+from langchain_core.runnables import RunnableConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -167,3 +169,31 @@ class RAGDatabaseManager:
             logger.info("🗑️ System Data Purge Complete.")
         except Exception as e:
             logger.error(f"❌ Error during native tables purge execution: {str(e)}")
+
+@tool
+def search_knowledge_base(query: str, config: RunnableConfig) -> str:
+    """
+    Searches the uploaded document base (PDFs, text files, code manuals, sales sheets)
+    using BM25 keyword routing. Returns relevant text fragments along with document titles.
+    Use this tool when the user asks specific factual questions, technical concepts, 
+    or code lookups requiring documentation context.
+    """
+    # Safely unpack the configurable dictionary
+    configurable = config.get("configurable", {}) if config else {}
+    db_manager = configurable.get("db_manager")
+    limit = configurable.get("retrieval_limit", 3)
+    
+    if not db_manager:
+        return "Error: Database manager instance is missing from the agent runtime configuration."
+        
+    matched_nodes = db_manager.search_bm25(query, limit=limit)
+    
+    if not matched_nodes:
+        return "No relevant textual context or metrics found in the knowledge base."
+        
+    # Format the hits into a clean string for the LLM to read
+    formatted_chunks = []
+    for m in matched_nodes:
+        formatted_chunks.append(f"[Source File: {m['filename']} | Chunk ID: {m['chunk_id']}]\n{m['text']}")
+        
+    return "\n\n---\n\n".join(formatted_chunks)

@@ -1,0 +1,7 @@
+# .streamlit/config.toml
+[theme]
+primaryColor = "#10b981"         # Emerald Green highlights for active states/buttons
+backgroundColor = "#0b0f17"      # Deep Obsidian/Black background for the main canvas
+secondaryBackgroundColor = "#161b26" # Slate Charcoal for sidebars, cards, and file uploaders
+textColor = "#f3f4f6"            # Crisp off-white font for comfortable readability
+font = "sans serif"
