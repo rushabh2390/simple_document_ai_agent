@@ -10,9 +10,9 @@ while ! nc -z localhost 11434; do
 done
 echo "Ollama core engine online!"
 
-# Auto-download the target model
-echo "Pulling llama3.2 manifest layers..."
-ollama pull llama3.2
+# FIX: Auto-download deepseek-r1:1.5b instead of llama3.2
+echo "Pulling deepseek-r1:1.5b manifest layers..."
+ollama pull deepseek-r1:1.5b
 echo "Model initialization complete!"
 
 # Bring the background server process to the foreground so the container stays alive

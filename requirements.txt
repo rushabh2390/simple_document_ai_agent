@@ -1,17 +1,28 @@
 # =====================================================================
-# 1. Hardware Index Pointer (Forces CUDA-Accelerated GPU Compilation)
+# 1. OPTIONAL HARDWARE SPECIFIC INDEX LOOKUPS
 # =====================================================================
---index-url https://download.pytorch.org/whl/cu121
+# Uncomment ONLY ONE of the lines below based on your target system architecture:
+
+# --- For NVIDIA CUDA 12.1 (Modern GPU Acceleration) ---
+# --extra-index-url https://download.pytorch.org/whl/cu121
+
+# --- For NVIDIA CUDA 12.6 / 12.4+ (Latest GPU Architectures) ---
+# --extra-index-url https://download.pytorch.org/whl/cu124
+
+# --- For CPU-Only Environments (Safe Legacy/DDR3 Framework Fallback) ---
+# --extra-index-url https://download.pytorch.org/whl/cpu
+
 
 # =====================================================================
-# 2. Deep Core Framework Dependencies (Explicitly Named to Lock Versioning)
+# 2. CORE MACHINE LEARNING FRAMEWORKS (Torch will map to the index above)
 # =====================================================================
 torch
 torchvision
 torchaudio
 
+
 # =====================================================================
-# 3. Backend, Routing, & Embedding Orchestration
+# 3. BACKEND, ROUTING, & EMBEDDING ORCHESTRATION
 # =====================================================================
 fastapi
 uvicorn
@@ -22,16 +33,19 @@ langchain-community
 langchain-chroma
 langchain-huggingface>=0.0.1
 langchain_ollama
+# Deeply tied to torch; will pull CPU or GPU binaries depending on index unlocked above
 sentence-transformers
 
+
 # =====================================================================
-# 4. Multi-Modal Content Ingestion & Slicing Matrix
+# 4. MULTI-MODAL CONTENT INGESTION & SLICING MATRIX
 # =====================================================================
 pypdf
 docling>=2.0.0
 rank_bm25>=0.2.2
 
+
 # =====================================================================
-# 5. Frontend Presentation Layer
+# 5. FRONTEND PRESENTATION LAYER
 # =====================================================================
 streamlit>=1.32.0

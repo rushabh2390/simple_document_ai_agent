@@ -53,7 +53,7 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
     # 4. Initialize the model with performance settings
     llm = ChatOllama(
         base_url=ollama_url,
-        model="llama3.2",
+        model="deepseek-r1:1.5b",
         temperature=temperature,
         num_ctx=4096,  # Kept small to make the prompt prefill phase instant
         num_predict=1024,
