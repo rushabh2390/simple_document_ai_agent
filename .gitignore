@@ -2,3 +2,4 @@
 launch.json
 __pycache__
 processed_data  
+.venv

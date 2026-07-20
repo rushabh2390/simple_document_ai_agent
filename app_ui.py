@@ -4,11 +4,19 @@ import pandas as pd
 from pathlib import Path
 from dotenv import load_dotenv
 import logging
-
 # Import core modular modules
 from document_parser import MultiModalDocumentParser
 from database_manager import RAGDatabaseManager
 from agent_engine import agent_app  # Import our newly constructed LangGraph machine
+import re
+
+def clean_deepseek_response(text: str) -> str:
+    """Removes the internal <think>...</think> monologue blocks from DeepSeek output."""
+    if not text:
+        return ""
+    # Strip out everything between <think> and </think> tags
+    cleaned_text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    return cleaned_text.strip()
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -68,8 +76,8 @@ with st.sidebar:
     
     st.markdown("---")
     st.subheader("✂️ Chunking Hyperparameters")
-    chunk_size = st.slider("Max Chunk Size", min_value=200, max_value=3000, value=1000, step=100)
-    chunk_overlap = st.slider("Chunk Overlap Block", min_value=0, max_value=500, value=200, step=20)
+    chunk_size = st.slider("Max Chunk Size", min_value=200, max_value=3000, value=1000, step=50)
+    chunk_overlap = st.slider("Chunk Overlap Block", min_value=0, max_value=500, value=200, step=10)
     
     st.markdown("---")
     st.subheader("🎛️ Agent Model Parameters")
@@ -107,6 +115,70 @@ if uploaded_files and st.button("🚀 Build Knowledge Base Index", use_container
 
 st.markdown("---")
 
+# =====================================================================
+# 1. TOP ROUTING BLOCK: CALCULATIONS & AGENT RUNTIME FIRST
+# =====================================================================
+if user_query := st.chat_input("Message your local knowledge agent..."):
+    # Append user question to history immediately
+    st.session_state.chat_history.append({"role": "user", "content": user_query})
+    
+    # OPTIONAL PRE-FETCH: Keeps the sidebar populated before tool execution if desired
+    # st.session_state.inspected_nodes = db_engine.search_bm25(user_query, limit=retrieval_top_k)
+
+    langgraph_messages = []
+    for m in st.session_state.chat_history:
+        role_tag = "user" if m["role"] == "user" else "assistant"
+        langgraph_messages.append((role_tag, m["content"]))
+    
+    from streamlit.runtime.scriptrunner import get_script_run_ctx, add_script_run_ctx
+    ctx = get_script_run_ctx()
+    
+    node_holder = []
+    agent_config = {
+        "configurable": {
+            "db_manager": db_engine,
+            "retrieval_limit": retrieval_top_k,
+            "ollama_base_url": ollama_base_url,
+            "temperature": generation_temperature,
+            "top_k": generation_top_k,
+            "shared_node_container": node_holder
+        }
+    }
+
+    # 🔥 FIX 2: Process the entire agent thread completely outside/above the workspace columns
+    with st.status("🧠 Agent Evaluating & Planning...", expanded=True) as status:
+        st.write("Initializing state nodes...")
+        stream_generator = agent_app.stream(
+            {"messages": langgraph_messages}, 
+            config=agent_config,
+            stream_mode="values"
+        )
+        
+        final_state = None
+        for market_chunk in stream_generator:
+            final_state = market_chunk
+            if "messages" in market_chunk and market_chunk["messages"]:
+                last_msg = market_chunk["messages"][-1]
+                if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                    st.write(f"⚙️ **Invoked Tool**: `search_knowledge_base`")
+            if node_holder:
+                st.session_state.inspected_nodes = node_holder
+        status.update(label="✅ Execution Path Complete", state="complete")
+
+    # Extract final text block safely
+    messages_list = final_state.get("messages", []) if final_state else []
+    if messages_list:
+        last_message = messages_list[-1]
+        final_answer = last_message.content if hasattr(last_message, "content") else str(last_message)
+        final_answer = clean_deepseek_response(final_answer)
+    else:
+        final_answer = "No response generated."
+
+    st.session_state.chat_history.append({"role": "assistant", "content": final_answer})
+    
+    # Instantly trigger a clean view refresh with all parameters set in stone
+    st.rerun()
+
 # --- TWO-COLUMN WORKSPACE FRAME (Left=Chat, Right=Asset Inspector) ---
 chat_canvas, asset_inspector = st.columns([3, 2], gap="large")
 
@@ -119,102 +191,32 @@ with chat_canvas:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-    if user_query := st.chat_input("Message your local knowledge agent..."):
-        with chat_container:
-            with st.chat_message("user"):
-                st.markdown(user_query)
-        st.session_state.chat_history.append({"role": "user", "content": user_query})
-        
-        # Prepare the conversation payload state
-        langgraph_messages = []
-        for m in st.session_state.chat_history:
-            role_tag = "user" if m["role"] == "user" else "assistant"
-            langgraph_messages.append((role_tag, m["content"]))
-            
-        # Configure dynamic graph parameter routing dictionary
-        agent_config = {
-            "configurable": {
-                "db_manager": db_engine,
-                "retrieval_limit": retrieval_top_k,
-                "ollama_base_url": ollama_base_url,
-                "temperature": generation_temperature,
-                "top_k": generation_top_k
-            }
-        }
-
-        with chat_container:
-            with st.chat_message("assistant"):
-                # Initialize our status container for tool tracking
-                with st.status("🧠 Agent Evaluating & Planning...", expanded=True) as status:
-                    st.write("Initializing state nodes...")
-                    
-                    # 1. Use .stream() instead of .invoke() to get fine-grained graph updates
-                    # we specify stream_mode="values" to track state content updates continuously
-                    stream_generator = agent_app.stream(
-                        {"messages": langgraph_messages}, 
-                        config=agent_config,
-                        stream_mode="values"
-                    )
-                    
-                    # We will collect the execution payloads as the graph processes them
-                    final_state = None
-                    for market_chunk in stream_generator:
-                        final_state = market_chunk
-                        # If a tool call has been packed into the latest message, show it live
-                        if "messages" in market_chunk and market_chunk["messages"]:
-                            last_msg = market_chunk["messages"][-1]
-                            if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-                                st.write(f"⚙️ **Invoked Tool**: `search_knowledge_base` with query: *\"{last_msg.tool_calls[0]['args']['query']}\"*")
-                    
-                    status.update(label="✅ Execution Path Complete", state="complete")
-                
-                # 2. Render real-time token streaming onto the chat canvas
-                # st.write_stream accepts any generator yielding strings and handles the UI updates perfectly
-                response_placeholder = st.empty()
-                
-                def token_streamer():
-                    # Extract messages from the terminal graph node state
-                    messages_list = final_state.get("messages", []) if final_state else []
-                    if messages_list:
-                        last_message = messages_list[-1]
-                        # Stream the contents if the object has stream capabilities
-                        if hasattr(last_message, "content"):
-                            # Split into words/tokens mock chunk or yield clean chunks
-                            yield last_message.content.strip()
-                        else:
-                            yield str(last_message).strip()
-
-                # Stream the finalized answer instantly with typewriter effects
-                final_response = response_placeholder.write_stream(token_streamer())
-                
-                # Append the finalized string payload back to historical view storage
-                st.session_state.chat_history.append({"role": "assistant", "content": final_response})
-                
-                # Fetch recent nodes directly from our live lookup to update asset inspector panel instantly
-                st.session_state.inspected_nodes = db_engine.search_bm25(user_query, limit=retrieval_top_k)
-                st.rerun()
-
 # --- RIGHT HAND SIDEBAR ASSET INSPECTOR ---
 with asset_inspector:
     st.subheader("🔍 Context & Asset Inspector")
-    if st.session_state.inspected_nodes:
-        st.caption("Active Visual Evidence mapped to your text context by the agent tool:")
-        for index, match in enumerate(st.session_state.inspected_nodes):
-            with st.container(border=True):
-                st.markdown(f"📄 **Hit #{index + 1}** | `{match['filename']}`")
-                with st.expander("🔬 View Text Context"):
-                    st.write(match["text"])
+    
+    # Create a persistent container inside the inspector
+    inspector_container = st.container(height=500, border=True)
+    
+    # Render whatever is currently in state upfront so it doesn't vanish
+    with inspector_container:
+        if st.session_state.inspected_nodes:
+            st.caption("Active Visual Evidence mapped to your text context by the agent tool:")
+            for index, match in enumerate(st.session_state.inspected_nodes):
+                with st.container(border=True):
+                    st.markdown(f"📄 **Hit #{index + 1}** | `{match['filename']}`")
+                    with st.expander("🔬 View Text Context", expanded=True):
+                        st.write(match["text"])
+                    if match.get("table_path") and os.path.exists(match["table_path"]):
+                        st.markdown("📊 **Extracted Structural Table Data:**")
+                        try:
+                            df_display = pd.read_csv(match["table_path"])
+                            st.dataframe(df_display, use_container_width=True, hide_index=True)
+                        except Exception as e:
+                            st.error(f"Error reading asset table: {e}")
                     
-                if match.get("table_path") and os.path.exists(match["table_path"]):
-                    try:
-                        df = pd.read_csv(match["table_path"])
-                        st.markdown("📊 **Associated Tabular Data Matrix:**")
-                        st.dataframe(df, use_container_width=True, hide_index=True)
-                    except Exception as t_err:
-                        st.caption(f"Table reference present but unreadable: {t_err}")
-                        
-                if match.get("image_path") and os.path.exists(match["image_path"]):
-                    st.markdown("🖼️ **Mapped Diagram/Crop Asset:**")
-                    st.image(match["image_path"], use_container_width=True)
-    else:
-        st.info("💡 Any extracted tables or diagram layouts selected by the LangGraph agent tool will stack right here.")
+                    if match.get("image_path") and os.path.exists(match["image_path"]):
+                        st.markdown("🖼️ **Extracted Diagram / Figure Asset:**")
+                        st.image(match["image_path"], use_container_width=True)
+        else:
+            st.info("💡 Any extracted tables or diagram layouts selected by the LangGraph agent tool will stack right here.")

@@ -70,9 +70,7 @@ class MultiModalDocumentParser:
         if ext in ['.csv', '.xlsx', '.xls']:
             try:
                 if ext == '.csv':
-                    # 1. Decode bytes safely to string handling bad characters
                     csv_text = file_bytes.decode('utf-8', errors='replace')
-                    # 2. Pass the text stream using io.StringIO
                     df = pd.read_csv(io.StringIO(csv_text))
                 else:
                     df = pd.read_excel(io.BytesIO(file_bytes))
@@ -81,15 +79,38 @@ class MultiModalDocumentParser:
                     logger.warning(f"⚠️ Tabular file {filename} is empty.")
                     return []
 
-                # Convert table data into clean, structured Markdown strings for our context window
-                markdown_table = df.to_markdown(index=False)
-                markdown_segments.append(f"### Tabular Dataset: {filename}\n\n{markdown_table}")
+                # Group rows dynamically (e.g., chunks of 15-20 records each)
+                row_chunk_size = 15 
+                headers_str = ", ".join(df.columns.tolist())
                 
-                # Persist the extracted table data as a clear clean asset CSV reference
-                csv_filename = f"table_{clean_name}_data.csv"
-                csv_filepath = self.table_dir / csv_filename
-                df.to_csv(csv_filepath, index=False)
-                table_paths.append(str(csv_filepath.resolve()))
+                for i in range(0, len(df), row_chunk_size):
+                    sub_df = df.iloc[i : i + row_chunk_size]
+                    
+                    # Store sub-slice as markdown representation for retrieval
+                    markdown_table = sub_df.to_markdown(index=False)
+                    
+                    # 🔥 INJECT CONTEXT CRITERIA DIRECTLY TO MAKE BM25 SEARCH WORK PERFECTLY
+                    semantic_text = (
+                        f"Dataset File: {filename}\n"
+                        f"Columns Present: {headers_str}\n"
+                        f"Data Rows:\n{markdown_table}"
+                    )
+                    
+                    # Persist this specific structural slice to a localized CSV matrix
+                    chunk_uid = f"{clean_name}_chunk_row_{i}"
+                    csv_filename = f"table_{clean_name}_slice_{i}.csv"
+                    csv_filepath = self.table_dir / csv_filename
+                    sub_df.to_csv(csv_filepath, index=False)
+                    
+                    all_compiled_chunks.append({
+                        "chunk_id": chunk_uid,
+                        "text": semantic_text,
+                        "table_path": str(csv_filepath.resolve()),
+                        "image_path": None
+                    })
+                
+                logger.info(f"✅ Finished tabular parsing workflow. Generated {len(all_compiled_chunks)} row chunks.")
+                return all_compiled_chunks
                 
             except Exception as e:
                 logger.error(f"💥 Native tabular pandas processor failed on {filename}: {str(e)}")
@@ -183,30 +204,41 @@ class MultiModalDocumentParser:
         # =====================================================================
         # 3. CHUNKING & MULTIMEDIA MAPPING EXTENSION
         # =====================================================================
-        full_markdown_content = "\n\n".join(markdown_segments)
-        
-        if full_markdown_content:
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=chunk_size,        
-                chunk_overlap=chunk_overlap,    
-                length_function=len,
-                separators=["\n\n", "\n", " ", ""]
-            )
-            
-            splits = text_splitter.split_text(full_markdown_content)
-            
-            for index, split_text in enumerate(splits):
-                assigned_table = table_paths[index % len(table_paths)] if table_paths else None
-                assigned_image = image_paths[index % len(image_paths)] if image_paths else None
+        if ext not in ['.csv', '.xlsx', '.xls'] and markdown_segments:
+            full_markdown_content = "\n\n".join(markdown_segments)
+            if full_markdown_content:
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=chunk_size,        
+                    chunk_overlap=chunk_overlap,    
+                    length_function=len,
+                    separators=["\n\n", "\n", " ", ""]
+                )
                 
-                all_compiled_chunks.append({
-                    "chunk_id": f"{clean_name}_chunk_{index}",
-                    "text": split_text,
-                    "table_path": assigned_table,
-                    "image_path": assigned_image  
-                })
+                splits = text_splitter.split_text(full_markdown_content)
                 
-            gc.collect()
+                for index, split_text in enumerate(splits):
+                    # 🔥 FIX: Only link assets if they are referenced or correspond to this text slice
+                    assigned_table = None
+                    for t_path in table_paths:
+                        t_name = Path(t_path).stem
+                        if t_name in split_text or (len(table_paths) == 1 and ext in ['.csv', '.xlsx']):
+                            assigned_table = t_path
+                            break
+                    
+                    assigned_image = None
+                    for img_path in image_paths:
+                        img_name = Path(img_path).stem
+                        if img_name in split_text:
+                            assigned_image = img_path
+                            break
+                    
+                    all_compiled_chunks.append({
+                        "chunk_id": f"{clean_name}_chunk_{index}",
+                        "text": split_text,
+                        "table_path": assigned_table,
+                        "image_path": assigned_image  
+                    })
 
+        gc.collect()
         logger.info(f"✅ Finished parsing workflow. Generated {len(all_compiled_chunks)} chunks for {filename}.")
         return all_compiled_chunks
