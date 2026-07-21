@@ -1,14 +1,28 @@
-# Simple Multimodal RAG Agent Platform
+# 🤖 LangGraph Multimodal AI Agent Hub
 
-A localized, high-fidelity Retrieval-Augmented Generation (RAG) system optimized for technical documents, textbooks, and sheets. It parses complex files into structured Markdown layouts, indexes them into a native SQLite FTS5 search engine, and generates contextual engineering answers using a localized `llama3.2` instance.
+A localized, high-fidelity Multimodal RAG & Agent Platform optimized for technical documents, textbooks, and structured datasets. Built using **LangGraph state machines**, it parses complex files into layout-aware Markdown representations, extracts dynamic tabular context, and streams reasoning steps directly inside an interactive UI.
 
 ---
 
 ## 🏗️ Architecture Blueprint
 
-* **Document Parsing Engine:** Converts raw assets into layout-aware Markdown representations, preserving grids, code listings, and tables seamlessly.
-* **Search Infrastructure:** Utilizes a lightweight, ultra-fast native SQLite FTS5 index combined with BM25 keyword rankings to extract context in milliseconds.
-* **LLM Engine:** Orchestrated locally via Ollama (`llama3.2`) to protect intellectual boundaries and guarantee zero data leaks.
+* **Orchestrator:** Multi-step **LangGraph State Machine** managing retrieval and reasoning nodes.
+* **Document Parsing Engine:** Layout-aware multimodal document parser extracting structured text, dynamic tables, and visual diagram assets.
+* **Context & Asset Inspector:** Dual-pane Streamlit dashboard that displays extracted visual elements, CSV tables, and raw chunk contexts side-by-side with chat interactions.
+* **Localized LLM Engine:** Powered by local Ollama instances (compatible with `llama3.2`, `deepseek-r1`, etc.) with built-in monologue stripping (`<think>` tags) and privacy-first local boundaries.
+
+---
+
+## 🎛️ UI & Features
+
+* **💬 Active Conversation Space:** Streamed agent execution updates (`st.status`) inline within the chat stream.
+* **🔍 Asset & Schema Inspector:** Instant rendering of extracted tabular CSV dataframes and diagram images retrieved during tool execution.
+* **📂 Ingestion Vault:** Multi-format uploader supporting `PDF`, `DOCX`, `XLSX`, `CSV`, `MD`, and `TXT` files with dynamic chunking.
+* **⚙️ Agent Settings:** Real-time adjustments for:
+  * Chunk Size & Overlap Parameters
+  * Retrieval Top-$K$ Windows
+  * Generation Temperature & Top-$K$ parameters
+  * One-click Index/Database Flushing
 
 ---
 
