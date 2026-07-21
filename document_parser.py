@@ -1,6 +1,8 @@
 import os
 import io
 import gc
+import json
+import sqlite3
 import logging
 from pathlib import Path
 from typing import Dict, Any, List
@@ -24,15 +26,17 @@ logger = logging.getLogger("MultiModalParser")
 
 
 class MultiModalDocumentParser:
-    def __init__(self, base_output_dir: str = "./processed_data", batch_size: int = 3):
+    def __init__(self, base_output_dir: str = "./processed_data", batch_size: int = 3, tabular_db_path: str = "./processed_data/dynamic_tabular_data.db"):
         """Initializes the multi-format document routing and processing engine."""
         self.base_dir = Path(base_output_dir)
         self.image_dir = self.base_dir / "images"
         self.table_dir = self.base_dir / "tables"
+        self.tabular_db_path = Path(tabular_db_path)
         self.batch_size = batch_size  
         
         self.image_dir.mkdir(parents=True, exist_ok=True)
         self.table_dir.mkdir(parents=True, exist_ok=True)
+        self.tabular_db_path.parent.mkdir(parents=True, exist_ok=True)
         
         logger.info("Initializing Docling Engine for layout documents...")
         pdf_options = PdfPipelineOptions()
@@ -52,10 +56,11 @@ class MultiModalDocumentParser:
 
     def parse_file(self, file_bytes: bytes, filename: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[Dict[str, Any]]:
         """
-        Routes files dynamically based on extension. Tabular data gets converted to 
-        structural markdown tables, while documents use layout analysis.
+        Routes files dynamically based on extension. Tabular data gets dumped into SQLite
+        and represented as a lightweight schema chunk for SQL tool routing, while 
+        documents use layout analysis.
         """
-        clean_name = Path(filename).stem.replace(" ", "_")
+        clean_name = Path(filename).stem.replace(" ", "_").lower()
         ext = Path(filename).suffix.lower()
         logger.info(f"🚀 Routing incoming file [{ext}]: {filename}")
         
@@ -65,7 +70,7 @@ class MultiModalDocumentParser:
         image_paths = []
 
         # =====================================================================
-        # ROUTE 1: TABULAR DATA PIPELINES (CSV & EXCEL)
+        # ROUTE 1: TABULAR DATA PIPELINES (CSV & EXCEL) - TEXT-TO-SQL HYBRID
         # =====================================================================
         if ext in ['.csv', '.xlsx', '.xls']:
             try:
@@ -79,37 +84,48 @@ class MultiModalDocumentParser:
                     logger.warning(f"⚠️ Tabular file {filename} is empty.")
                     return []
 
-                # Group rows dynamically (e.g., chunks of 15-20 records each)
-                row_chunk_size = 15 
-                headers_str = ", ".join(df.columns.tolist())
+                # Remove completely empty rows and columns to conserve database space
+                df = df.dropna(how='all').dropna(axis=1, how='all')
                 
-                for i in range(0, len(df), row_chunk_size):
-                    sub_df = df.iloc[i : i + row_chunk_size]
-                    
-                    # Store sub-slice as markdown representation for retrieval
-                    markdown_table = sub_df.to_markdown(index=False)
-                    
-                    # 🔥 INJECT CONTEXT CRITERIA DIRECTLY TO MAKE BM25 SEARCH WORK PERFECTLY
-                    semantic_text = (
-                        f"Dataset File: {filename}\n"
-                        f"Columns Present: {headers_str}\n"
-                        f"Data Rows:\n{markdown_table}"
-                    )
-                    
-                    # Persist this specific structural slice to a localized CSV matrix
-                    chunk_uid = f"{clean_name}_chunk_row_{i}"
-                    csv_filename = f"table_{clean_name}_slice_{i}.csv"
-                    csv_filepath = self.table_dir / csv_filename
-                    sub_df.to_csv(csv_filepath, index=False)
-                    
-                    all_compiled_chunks.append({
-                        "chunk_id": chunk_uid,
-                        "text": semantic_text,
-                        "table_path": str(csv_filepath.resolve()),
-                        "image_path": None
-                    })
+                # Clean column names for SQL safety (e.g. replace spaces and dashes with underscores)
+                df.columns = [str(c).strip().replace(" ", "_").replace("-", "_").replace(".", "_") for c in df.columns]
+
+                # 1. Store full dataset into local SQLite database for instant SQL querying
+                table_name = f"tbl_{clean_name}"
+                conn = sqlite3.connect(str(self.tabular_db_path))
+                df.to_sql(table_name, conn, if_exists="replace", index=False)
+                conn.close()
+                logger.info(f"📊 Persisted {len(df)} rows into SQLite table: '{table_name}'")
+
+                # 2. Persist full CSV copy for Streamlit Inspector UI
+                csv_filepath = self.table_dir / f"table_{clean_name}_full.csv"
+                df.to_csv(csv_filepath, index=False)
+
+                # 3. Create a lightweight Schema Metadata Chunk (~150 tokens) for BM25 retrieval
+                columns_schema = []
+                for col in df.columns:
+                    sample_vals = [str(v) for v in df[col].dropna().unique()[:3].tolist()]
+                    columns_schema.append(f"  - {col} ({df[col].dtype}): e.g. {sample_vals}")
+
+                schema_text = (
+                    f"📁 TABULAR DATASET METADATA:\n"
+                    f"Source File: {filename}\n"
+                    f"Database Table Name: {table_name}\n"
+                    f"Total Rows: {len(df)}\n"
+                    f"Columns & Types:\n" + "\n".join(columns_schema) + "\n\n"
+                    f"System Note: For analytical or aggregation queries (summaries, sums, totals, counts, filtering), "
+                    f"use the 'query_tabular_database' tool against table '{table_name}'."
+                )
+
+                all_compiled_chunks.append({
+                    "chunk_id": f"{clean_name}_schema",
+                    "text": schema_text,
+                    "table_path": str(csv_filepath.resolve()),
+                    "image_path": None,
+                    "table_name": table_name
+                })
                 
-                logger.info(f"✅ Finished tabular parsing workflow. Generated {len(all_compiled_chunks)} row chunks.")
+                logger.info(f"✅ Tabular parsing complete. Schema chunk indexed for '{filename}'.")
                 return all_compiled_chunks
                 
             except Exception as e:
@@ -182,12 +198,10 @@ class MultiModalDocumentParser:
         # =====================================================================
         elif ext in ['.docx', '.txt', '.md']:
             try:
-                # Text/Markdown files can be read directly or wrapped in native layout streams
                 if ext in ['.txt', '.md']:
                     text_content = file_bytes.decode('utf-8', errors='replace')
                     markdown_segments.append(text_content)
                 else:
-                    # Word Document processing via Docling
                     with io.BytesIO(file_bytes) as file_stream:
                         source_stream = DocumentStream(name=filename, stream=file_stream)
                         conversion_result = self.converter.convert(source_stream)
@@ -202,7 +216,7 @@ class MultiModalDocumentParser:
             return []
 
         # =====================================================================
-        # 3. CHUNKING & MULTIMEDIA MAPPING EXTENSION
+        # 3. CHUNKING & MULTIMEDIA MAPPING EXTENSION (For Text & PDF Docs)
         # =====================================================================
         if ext not in ['.csv', '.xlsx', '.xls'] and markdown_segments:
             full_markdown_content = "\n\n".join(markdown_segments)
@@ -217,11 +231,10 @@ class MultiModalDocumentParser:
                 splits = text_splitter.split_text(full_markdown_content)
                 
                 for index, split_text in enumerate(splits):
-                    # 🔥 FIX: Only link assets if they are referenced or correspond to this text slice
                     assigned_table = None
                     for t_path in table_paths:
                         t_name = Path(t_path).stem
-                        if t_name in split_text or (len(table_paths) == 1 and ext in ['.csv', '.xlsx']):
+                        if t_name in split_text:
                             assigned_table = t_path
                             break
                     

@@ -7,45 +7,12 @@ from langgraph.graph import StateGraph, START, END, MessagesState
 from langgraph.prebuilt import ToolNode
 from langchain_core.runnables import RunnableConfig
 
-# Import our search tool from the database manager
-from database_manager import search_knowledge_base
-
-def first_tool_call(state: MessagesState):
-    """
-    Seeding Node: Hardcodes a tool call using the user's latest message 
-    without spending processing cycles on an LLM inference pass.
-    """
-    messages = state["messages"]
-    if not messages:
-        return {"messages": []}
-        
-    # Safely extract user query string from history types
-    last_raw_message = messages[-1]
-    if isinstance(last_raw_message, tuple):
-        _, user_query = last_raw_message
-    elif hasattr(last_raw_message, "content"):
-        user_query = last_raw_message.content
-    else:
-        user_query = str(last_raw_message)
-
-    # We manually build the tool call payload structure.
-    # This acts exactly like an LLM requesting a tool execution block.
-    forced_tool_message = AIMessage(
-        content="",
-        tool_calls=[
-            {
-                "name": "search_knowledge_base",
-                "args": {"query": user_query},
-                "id": f"call_{uuid.uuid4().hex[:12]}" # Unique token for tracking trace integrity
-            }
-        ]
-    )
-    
-    return {"messages": [forced_tool_message]}
+# Import tools from database manager
+from database_manager import search_knowledge_base, query_tabular_database
 
 
 def call_model(state: MessagesState, config: RunnableConfig = None):
-    """Reasoning node: Reviews tool context data and writes the final response."""
+    """Reasoning node: Dynamically selects tools (SQL or Doc Search) and synthesizes responses."""
     messages = state["messages"]
     configurable = config.get("configurable", {}) if config else {}
     
@@ -55,13 +22,20 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
     
     system_instruction = SystemMessage(
         content=(
-            "You are a local RAG Agent. Review the context provided by your retrieval tools. "
-            "If the context contains data grids, metrics, or logs, construct a markdown table. "
-            "Keep answers clear, grounded, and concise."
+            "You are an advanced local RAG & Data Analytics Agent.\n\n"
+            "You have two tools available:\n"
+            "1. 'query_tabular_database': Use this tool to run SQL queries against uploaded CSV/Excel tables. "
+            "Use it for any mathematical aggregations, sums, counts, quarterly/monthly summaries, or column filtering.\n"
+            "2. 'search_knowledge_base': Use this tool to search unstructured text documents (PDFs, Word files, text docs) "
+            "for text context and guidelines.\n\n"
+            "Guidelines:\n"
+            "- When writing SQL queries, use SQLite standard syntax and inspect dataset column names provided in the schema.\n"
+            "- Never make up or hallucinate numbers. Rely strictly on query tool outputs.\n"
+            "- Keep answers concise, grounded, and present tabular findings in clean Markdown tables."
         )
     )
     
-    # Safely clean and resolve messages array types
+    # Safely resolve messages array types
     processed_messages = []
     for m in messages:
         if isinstance(m, tuple):
@@ -70,7 +44,14 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
         else:
             processed_messages.append(m)
 
-    routing_messages = [system_instruction] + processed_messages
+    # 🔥 SLIDING WINDOW HISTORY TRIMMER:
+    # Keep system prompt + the last 6 active messages to prevent context window overflow (18k token crashes)
+    if len(processed_messages) > 6:
+        recent_history = processed_messages[-6:]
+    else:
+        recent_history = processed_messages
+
+    routing_messages = [system_instruction] + recent_history
     
     llm = ChatOllama(
         base_url=ollama_url,
@@ -84,8 +65,8 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
         }
     )
     
-    # We maintain binding syntax so history serialization remains consistent
-    tools = [search_knowledge_base]
+    # Bind BOTH tools to the model
+    tools = [search_knowledge_base, query_tabular_database]
     llm_with_tools = llm.bind_tools(tools)
     
     response = llm_with_tools.invoke(routing_messages)
@@ -93,7 +74,7 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
 
 
 def route_tools(state: MessagesState) -> Literal["tools", END]:
-    """Conditional Edge router tracking loop iterations."""
+    """Conditional Edge router checking if LLM requested tool calls."""
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "tools"
@@ -101,26 +82,21 @@ def route_tools(state: MessagesState) -> Literal["tools", END]:
 
 
 # =====================================================================
-# SEEDED LANGGRAPH AGENT WORKFLOW STATE MACHINE
+# LANGGRAPH AGENT WORKFLOW STATE MACHINE
 # =====================================================================
 workflow = StateGraph(MessagesState)
 
+# List of tools provided to ToolNode
+all_tools = [search_knowledge_base, query_tabular_database]
+
 # 1. Define processing block nodes
-workflow.add_node("startup_tool_seeder", first_tool_call)
 workflow.add_node("agent", call_model)
-workflow.add_node("tools", ToolNode([search_knowledge_base]))
+workflow.add_node("tools", ToolNode(all_tools))
 
-# 2. Build the execution layout routing map
-# 🔥 FORCE execution to start at our seeding node
-workflow.add_edge(START, "startup_tool_seeder")
+# 2. Build execution routing map
+workflow.add_edge(START, "agent")
 
-# This forces the generated call straight into your database tool node
-workflow.add_edge("startup_tool_seeder", "tools")
-
-# After the tool fetches metrics, execution loops into your agent node to answer
-workflow.add_edge("tools", "agent")
-
-# The agent checks if it needs any further follow-up or exits cleanly
+# Agent checks if it called a tool or is ready to return final answer
 workflow.add_conditional_edges(
     "agent",
     route_tools,
@@ -129,5 +105,8 @@ workflow.add_conditional_edges(
         "__end__": END  
     }
 )
+
+# Loop back to agent after tool execution so it can read tool results and form response
+workflow.add_edge("tools", "agent")
 
 agent_app = workflow.compile()

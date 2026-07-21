@@ -1,12 +1,12 @@
 import os
 import sqlite3
 import re
+import json
 import logging
 from pathlib import Path
 from typing import List, Dict, Any
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
-import streamlit as st
 import pandas as pd
 
 logging.basicConfig(
@@ -57,11 +57,9 @@ class RAGDatabaseManager:
                     );
                 """)
                 conn.commit()
-                logger.info(
-                    "✅ Native SQLite engine & FTS5 full-text indices initialized.")
+                logger.info("✅ Native SQLite engine & FTS5 full-text indices initialized.")
         except Exception as e:
-            logger.critical(
-                f"💥 Failed to initialize native database: {str(e)}")
+            logger.critical(f"💥 Failed to initialize native database: {str(e)}")
 
     def insert_document_chunks(self, chunks: List[Dict[str, Any]], filename: str):
         """Inserts a batch of multi-modal document chunks cleanly inside a single transaction."""
@@ -84,15 +82,14 @@ class RAGDatabaseManager:
                         chunk.get("image_path")
                     ))
 
-                    # Mirror raw text into the full-text text search virtual table
+                    # Mirror raw text into the full-text search virtual table
                     cursor.execute("""
                         INSERT OR REPLACE INTO fts5_bm25_idx (chunk_id, text) 
                         VALUES (?, ?);
                     """, (chunk["chunk_id"], chunk["text"]))
 
                 conn.commit()
-            logger.info(
-                f"💾 Successfully indexed {len(chunks)} chunks from '{filename}'.")
+            logger.info(f"💾 Successfully indexed {len(chunks)} chunks from '{filename}'.")
         except Exception as e:
             logger.error(f"❌ Failed native SQLite batch insertion: {str(e)}")
 
@@ -107,7 +104,6 @@ class RAGDatabaseManager:
         fts5_query = " OR ".join([f'"{word}"' for word in clean_words])
         like_query = f"%{query}%"
 
-        # FIX: Explicitly match the virtual index table alias inside bm25()
         search_sql = """
             SELECT 
                 dc.chunk_id, 
@@ -145,7 +141,6 @@ class RAGDatabaseManager:
                 rows = cursor.fetchall()
 
                 for row in rows:
-                    # Prevent duplicates if a node matches both FTS5 and LIKE fallback
                     if any(r["chunk_id"] == row["chunk_id"] for r in results):
                         continue
 
@@ -155,18 +150,15 @@ class RAGDatabaseManager:
                         "text": row["raw_text"],
                         "table_path": row["table_path"],
                         "image_path": row["image_path"],
-                        # In SQLite BM25, lower scores mean closer matches.
-                        # We invert it or present structural metrics clearly here.
                         "score": abs(row["rank_score"]) if row["rank_score"] != 999.0 else 0.0001
                     })
         except Exception as e:
-            logger.error(
-                f"🔍 Native SQLite search encountered an error: {str(e)}")
+            logger.error(f"🔍 Native SQLite search encountered an error: {str(e)}")
 
         return results
 
     def wipe_all_data(self):
-        """Clears all records instantly, resetting the vector database matrix state."""
+        """Clears all records instantly, resetting the database state."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -175,15 +167,72 @@ class RAGDatabaseManager:
                 conn.commit()
             logger.info("🗑️ System Data Purge Complete.")
         except Exception as e:
-            logger.error(
-                f"❌ Error during native tables purge execution: {str(e)}")
+            logger.error(f"❌ Error during native tables purge execution: {str(e)}")
 
 
+# =====================================================================
+# TOOL 1: SQL EXECUTOR TOOL (FOR CSV / EXCEL TABULAR DATA)
+# =====================================================================
+@tool
+def query_tabular_database(sql_query: str) -> str:
+    """
+    Executes a SQL query against uploaded tabular datasets (CSV/Excel tables) stored in SQLite.
+    Use this tool for mathematical aggregations, quarterly/monthly reports, sum calculations,
+    counting records, filtering, or finding min/max values in spreadsheets.
+    
+    Example: SELECT QTR_ID, SUM(SALES) as total_sales FROM tbl_sales_data_sample GROUP BY QTR_ID
+    """
+    configurable = config.get("configurable", {}) if config else {}
+    db_manager = configurable.get("db_manager")
+    shared_node_container = configurable.get("shared_node_container")
+    
+    tabular_db_path = Path("./processed_data/dynamic_tabular_data.db")
+    if not tabular_db_path.exists():
+        return "Error: No tabular database found. Please upload a CSV or Excel file first."
+
+    try:
+        conn = sqlite3.connect(str(tabular_db_path))
+        
+        # Enforce safety check: limit un-aggregated queries to avoid context explosion
+        upper_sql = sql_query.upper()
+        if "GROUP BY" not in upper_sql and "LIMIT" not in upper_sql and upper_sql.strip().startswith("SELECT"):
+            sql_query += " LIMIT 20"
+            
+        df_result = pd.read_sql_query(sql_query, conn)
+        conn.close()
+        
+        # 🔥 POPULATE CONTEXT & ASSET INSPECTOR UI FOR STREAMLIT:
+        if shared_node_container is not None and db_manager:
+            try:
+                # Find referenced table name in SQL (e.g. tbl_sales_data)
+                table_match = re.search(r"FROM\s+([a-zA-Z0-9_]+)", sql_query, re.IGNORECASE)
+                if table_match:
+                    target_table = table_match.group(1).lower()
+                    # Query rag_storage.db for the schema node matching this table
+                    results = db_manager.search_bm25(target_table, limit=1)
+                    if results:
+                        shared_node_container.extend(results)
+            except Exception as inspect_err:
+                logger.warning(f"Could not populate inspector panel node: {inspect_err}")
+
+        if df_result.empty:
+            return "Query executed successfully, but returned 0 records."
+            
+        # Return results as a compact Markdown table for the LLM
+        return f"SQL Execution Result ({len(df_result)} rows returned):\n\n" + df_result.to_markdown(index=False)
+        
+    except Exception as e:
+        return f"SQL Execution Error: {str(e)}. Please check your table and column names in the dataset schema."
+
+
+# =====================================================================
+# TOOL 2: DOCUMENT TEXT RETRIEVAL TOOL (FOR PDF, MD, DOCX)
+# =====================================================================
 @tool
 def search_knowledge_base(query: str, config: RunnableConfig) -> str:
     """
-    Searches the uploaded document base (PDFs, text files, code manuals, sales sheets)
-    using BM25 keyword routing. Returns relevant text fragments along with document titles.
+    Searches uploaded unstructured documents (PDFs, text files, Word documents)
+    using BM25 keyword routing. Returns relevant text passages along with document titles.
     """
     configurable = config.get("configurable", {}) if config else {}
     db_manager = configurable.get("db_manager")
@@ -201,27 +250,30 @@ def search_knowledge_base(query: str, config: RunnableConfig) -> str:
         return "No relevant textual context or metrics found in the knowledge base."
 
     formatted_chunks = []
+    total_chars = 0
+    MAX_CHAR_CAP = 12000  # Cap around ~3,000 tokens to prevent Ollama context overflow
+
     for m in matched_nodes:
-        # Start with the basic metadata and row description
         context_chunk = f"[Source File: {m['filename']} | Chunk ID: {m['chunk_id']}]\n{m['text']}"
         
-        # Guardrail check for structural table data
+        # Check for structural table previews in PDFs
         if m.get("table_path") and os.path.exists(m["table_path"]):
             try:
                 table_df = pd.read_csv(m["table_path"])
-                
-                # 🔥 FIX: Only feed the top 3-5 preview rows to the LLM context to prevent token explosion.
-                # The full dataset will still load completely in your Streamlit Inspector Panel!
                 preview_rows = 5 
                 table_markdown = table_df.head(preview_rows).to_markdown(index=False)
                 
                 context_chunk += (
                     f"\n\n📊 [TABLE PREVIEW (First {preview_rows} rows out of {len(table_df)} total)]:\n{table_markdown}\n"
-                    f"Note: The complete table asset has been loaded into the user's Inspector UI layout panel."
                 )
             except Exception as e:
-                logger.warning(f"Could not safely append table data snippet: {e}")
-                
+                logger.warning(f"Could not append table data snippet: {e}")
+
+        if total_chars + len(context_chunk) > MAX_CHAR_CAP:
+            formatted_chunks.append("\n[Note: Remaining chunks omitted to keep context size safe.]")
+            break
+
         formatted_chunks.append(context_chunk)
+        total_chars += len(context_chunk)
 
     return "\n\n---\n\n".join(formatted_chunks)
