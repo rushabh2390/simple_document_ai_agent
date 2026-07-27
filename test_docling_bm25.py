@@ -15,10 +15,10 @@ os.makedirs(IMAGE_OUTPUT_DIR, exist_ok=True)
 
 # 1. Pipeline Settings
 pdf_options = PdfPipelineOptions()
-pdf_options.images_scale = 0.5            
-pdf_options.generate_picture_images = True # Populate image crops safely
-pdf_options.do_table_structure = False      
-pdf_options.do_ocr = False                  
+pdf_options.images_scale = 0.5
+pdf_options.generate_picture_images = True  # Populate image crops safely
+pdf_options.do_table_structure = False
+pdf_options.do_ocr = False
 
 converter = DocumentConverter(
     format_options={
@@ -26,8 +26,10 @@ converter = DocumentConverter(
     }
 )
 
+
 def tokenize_text(text: str) -> list[str]:
     return re.sub(r"[^\w\s]", "", text.lower()).split()
+
 
 # Target file configuration
 pdf_path = r"E:\Deep-Learning-with-PyTorch.pdf"
@@ -36,7 +38,7 @@ if not os.path.exists(pdf_path):
     print(f"❌ Error: Cannot find file at '{pdf_path}'")
     exit(1)
 
-chunks_pool = []  
+chunks_pool = []
 chunker = HybridChunker(max_tokens=5000)
 
 print(f"⏳ Reading PDF page structure using pypdf...")
@@ -47,38 +49,39 @@ print(f"📚 Total pages discovered: {total_pages}")
 # Batch size of 3 avoids memory overflow on heavy graphic page segments
 BATCH_SIZE = 3
 
-print(f"⏳ Step 1 & 2: Batch processing document pages in micro-segments of {BATCH_SIZE}...")
+print(
+    f"⏳ Step 1 & 2: Batch processing document pages in micro-segments of {BATCH_SIZE}...")
 
 for start_page in range(0, total_pages, BATCH_SIZE):
     end_page = min(start_page + BATCH_SIZE, total_pages)
     print(f" -> Processing pages [{start_page} to {end_page}]...")
-    
+
     writer = PdfWriter()
     for page_idx in range(start_page, end_page):
         writer.add_page(reader.pages[page_idx])
-        
+
     pdf_buffer = io.BytesIO()
     writer.write(pdf_buffer)
     pdf_buffer.seek(0)
-    
+
     try:
         source_stream = DocumentStream(
-            name=f"batch_{start_page}_{end_page}.pdf", 
+            name=f"batch_{start_page}_{end_page}.pdf",
             stream=pdf_buffer
         )
-        
+
         conversion_result = converter.convert(source_stream)
         doc = conversion_result.document
-        
+
         # ─── FIXED: CORRECT V2 UNIVERSAL ITEM ITERATION ───
         saved_images_map = {}
-        
+
         # Iterate through structural items and look for populated item images
         for item, _level in doc.iterate_items():
             if hasattr(item, "image") and item.image and getattr(item.image, "pil_image", None):
                 img_filename = f"img_page_{start_page}_{item.self_ref.replace('/', '_')}.png"
                 img_filepath = os.path.join(IMAGE_OUTPUT_DIR, img_filename)
-                
+
                 # Save the cropped layout image to disk
                 item.image.pil_image.save(img_filepath, format="PNG")
                 saved_images_map[item.self_ref] = img_filepath
@@ -87,21 +90,22 @@ for start_page in range(0, total_pages, BATCH_SIZE):
         doc_chunks = chunker.chunk(doc)
         for chunk in doc_chunks:
             chunk_text = chunker.contextualize(chunk)
-            
+
             matched_image_path = None
             if hasattr(chunk, "meta") and chunk.meta.doc_items:
                 for meta_item in chunk.meta.doc_items:
                     if meta_item.self_ref in saved_images_map:
                         matched_image_path = saved_images_map[meta_item.self_ref]
                         break
-            
+
             chunks_pool.append({
                 "text": chunk_text,
                 "image_path": matched_image_path
             })
-            
+
     except Exception as e:
-        print(f" ⚠️ Warning: Failed processing page slice range [{start_page}-{end_page}]: {e}")
+        print(
+            f" ⚠️ Warning: Failed processing page slice range [{start_page}-{end_page}]: {e}")
         continue
     finally:
         # Explicit clean-up logic to release back-end C++ buffers on every loop execution
@@ -109,7 +113,8 @@ for start_page in range(0, total_pages, BATCH_SIZE):
         del writer
         gc.collect()
 
-print(f"✅ Successfully compiled {len(chunks_pool)} total chunks across all page batches.")
+print(
+    f"✅ Successfully compiled {len(chunks_pool)} total chunks across all page batches.")
 
 # 3. Build Search Index
 if len(chunks_pool) == 0:

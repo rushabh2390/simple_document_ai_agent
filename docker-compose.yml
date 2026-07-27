@@ -37,7 +37,7 @@ services:
     volumes:
       - ollama_storage:/root/.ollama
       - ./entrypoint.sh:/entrypoint.sh
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    entrypoint: [ "/bin/sh", "/entrypoint.sh" ]
     # REMOVED the deploy: resources: reservations: devices: driver: nvidia block
     restart: unless-stopped
 
@@ -50,9 +50,9 @@ services:
     ports:
       - "8501:8501"
     environment:
-      - OLLAMA_BASE_URL=http://ollama_service:11434  
+      - OLLAMA_BASE_URL=http://ollama_service:11434
     volumes:
-      - ./processed_data:/app/processed_data  # Keeps your SQLite RAG database local and viewable
+      - ./processed_data:/app/processed_data # Keeps your SQLite RAG database local and viewable
     depends_on:
       - ollama
     restart: unless-stopped

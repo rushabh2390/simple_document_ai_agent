@@ -57,9 +57,11 @@ class RAGDatabaseManager:
                     );
                 """)
                 conn.commit()
-                logger.info("✅ Native SQLite engine & FTS5 full-text indices initialized.")
+                logger.info(
+                    "✅ Native SQLite engine & FTS5 full-text indices initialized.")
         except Exception as e:
-            logger.critical(f"💥 Failed to initialize native database: {str(e)}")
+            logger.critical(
+                f"💥 Failed to initialize native database: {str(e)}")
 
     def insert_document_chunks(self, chunks: List[Dict[str, Any]], filename: str):
         """Inserts a batch of multi-modal document chunks cleanly inside a single transaction."""
@@ -89,7 +91,8 @@ class RAGDatabaseManager:
                     """, (chunk["chunk_id"], chunk["text"]))
 
                 conn.commit()
-            logger.info(f"💾 Successfully indexed {len(chunks)} chunks from '{filename}'.")
+            logger.info(
+                f"💾 Successfully indexed {len(chunks)} chunks from '{filename}'.")
         except Exception as e:
             logger.error(f"❌ Failed native SQLite batch insertion: {str(e)}")
 
@@ -153,7 +156,8 @@ class RAGDatabaseManager:
                         "score": abs(row["rank_score"]) if row["rank_score"] != 999.0 else 0.0001
                     })
         except Exception as e:
-            logger.error(f"🔍 Native SQLite search encountered an error: {str(e)}")
+            logger.error(
+                f"🔍 Native SQLite search encountered an error: {str(e)}")
 
         return results
 
@@ -167,7 +171,8 @@ class RAGDatabaseManager:
                 conn.commit()
             logger.info("🗑️ System Data Purge Complete.")
         except Exception as e:
-            logger.error(f"❌ Error during native tables purge execution: {str(e)}")
+            logger.error(
+                f"❌ Error during native tables purge execution: {str(e)}")
 
 
 # =====================================================================
@@ -179,33 +184,34 @@ def query_tabular_database(sql_query: str) -> str:
     Executes a SQL query against uploaded tabular datasets (CSV/Excel tables) stored in SQLite.
     Use this tool for mathematical aggregations, quarterly/monthly reports, sum calculations,
     counting records, filtering, or finding min/max values in spreadsheets.
-    
+
     Example: SELECT QTR_ID, SUM(SALES) as total_sales FROM tbl_sales_data_sample GROUP BY QTR_ID
     """
     configurable = config.get("configurable", {}) if config else {}
     db_manager = configurable.get("db_manager")
     shared_node_container = configurable.get("shared_node_container")
-    
+
     tabular_db_path = Path("./processed_data/dynamic_tabular_data.db")
     if not tabular_db_path.exists():
         return "Error: No tabular database found. Please upload a CSV or Excel file first."
 
     try:
         conn = sqlite3.connect(str(tabular_db_path))
-        
+
         # Enforce safety check: limit un-aggregated queries to avoid context explosion
         upper_sql = sql_query.upper()
         if "GROUP BY" not in upper_sql and "LIMIT" not in upper_sql and upper_sql.strip().startswith("SELECT"):
             sql_query += " LIMIT 20"
-            
+
         df_result = pd.read_sql_query(sql_query, conn)
         conn.close()
-        
+
         # 🔥 POPULATE CONTEXT & ASSET INSPECTOR UI FOR STREAMLIT:
         if shared_node_container is not None and db_manager:
             try:
                 # Find referenced table name in SQL (e.g. tbl_sales_data)
-                table_match = re.search(r"FROM\s+([a-zA-Z0-9_]+)", sql_query, re.IGNORECASE)
+                table_match = re.search(
+                    r"FROM\s+([a-zA-Z0-9_]+)", sql_query, re.IGNORECASE)
                 if table_match:
                     target_table = table_match.group(1).lower()
                     # Query rag_storage.db for the schema node matching this table
@@ -213,14 +219,15 @@ def query_tabular_database(sql_query: str) -> str:
                     if results:
                         shared_node_container.extend(results)
             except Exception as inspect_err:
-                logger.warning(f"Could not populate inspector panel node: {inspect_err}")
+                logger.warning(
+                    f"Could not populate inspector panel node: {inspect_err}")
 
         if df_result.empty:
             return "Query executed successfully, but returned 0 records."
-            
+
         # Return results as a compact Markdown table for the LLM
         return f"SQL Execution Result ({len(df_result)} rows returned):\n\n" + df_result.to_markdown(index=False)
-        
+
     except Exception as e:
         return f"SQL Execution Error: {str(e)}. Please check your table and column names in the dataset schema."
 
@@ -238,7 +245,7 @@ def search_knowledge_base(query: str, config: RunnableConfig) -> str:
     db_manager = configurable.get("db_manager")
     limit = configurable.get("retrieval_limit", 3)
     shared_node_container = configurable.get("shared_node_container")
-    
+
     if not db_manager:
         return "Error: Database manager instance is missing from the agent runtime configuration."
 
@@ -255,14 +262,15 @@ def search_knowledge_base(query: str, config: RunnableConfig) -> str:
 
     for m in matched_nodes:
         context_chunk = f"[Source File: {m['filename']} | Chunk ID: {m['chunk_id']}]\n{m['text']}"
-        
+
         # Check for structural table previews in PDFs
         if m.get("table_path") and os.path.exists(m["table_path"]):
             try:
                 table_df = pd.read_csv(m["table_path"])
-                preview_rows = 5 
-                table_markdown = table_df.head(preview_rows).to_markdown(index=False)
-                
+                preview_rows = 5
+                table_markdown = table_df.head(
+                    preview_rows).to_markdown(index=False)
+
                 context_chunk += (
                     f"\n\n📊 [TABLE PREVIEW (First {preview_rows} rows out of {len(table_df)} total)]:\n{table_markdown}\n"
                 )
@@ -270,7 +278,8 @@ def search_knowledge_base(query: str, config: RunnableConfig) -> str:
                 logger.warning(f"Could not append table data snippet: {e}")
 
         if total_chars + len(context_chunk) > MAX_CHAR_CAP:
-            formatted_chunks.append("\n[Note: Remaining chunks omitted to keep context size safe.]")
+            formatted_chunks.append(
+                "\n[Note: Remaining chunks omitted to keep context size safe.]")
             break
 
         formatted_chunks.append(context_chunk)

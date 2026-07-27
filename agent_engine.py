@@ -15,11 +15,11 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
     """Reasoning node: Dynamically selects tools (SQL or Doc Search) and synthesizes responses."""
     messages = state["messages"]
     configurable = config.get("configurable", {}) if config else {}
-    
+
     ollama_url = configurable.get("ollama_base_url", "http://localhost:11434")
     temperature = configurable.get("temperature", 0.0)
     top_k = configurable.get("top_k", 40)
-    
+
     system_instruction = SystemMessage(
         content=(
             "You are an advanced local RAG & Data Analytics Agent.\n\n"
@@ -34,13 +34,14 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
             "- Keep answers concise, grounded, and present tabular findings in clean Markdown tables."
         )
     )
-    
+
     # Safely resolve messages array types
     processed_messages = []
     for m in messages:
         if isinstance(m, tuple):
             role, content_text = m
-            processed_messages.append(HumanMessage(content=content_text) if role == "user" else AIMessage(content=content_text))
+            processed_messages.append(HumanMessage(
+                content=content_text) if role == "user" else AIMessage(content=content_text))
         else:
             processed_messages.append(m)
 
@@ -52,23 +53,23 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
         recent_history = processed_messages
 
     routing_messages = [system_instruction] + recent_history
-    
+
     llm = ChatOllama(
         base_url=ollama_url,
         model="deepseek-r1:1.5b",
         temperature=temperature,
-        num_ctx=32768,  
+        num_ctx=32768,
         num_predict=1024,
         additional_kwargs={
             "top_k": top_k,
-            "num_thread": 8  
+            "num_thread": 8
         }
     )
-    
+
     # Bind BOTH tools to the model
     tools = [search_knowledge_base, query_tabular_database]
     llm_with_tools = llm.bind_tools(tools)
-    
+
     response = llm_with_tools.invoke(routing_messages)
     return {"messages": [response]}
 
@@ -102,7 +103,7 @@ workflow.add_conditional_edges(
     route_tools,
     {
         "tools": "tools",
-        "__end__": END  
+        "__end__": END
     }
 )
 

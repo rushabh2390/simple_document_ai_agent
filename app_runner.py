@@ -5,7 +5,8 @@ from document_parser import MultiModalDocumentParser
 from database_manager import RAGDatabaseManager
 
 # Setup basic runtime logging visibility
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("RAGOrchestrator")
 
 
@@ -14,7 +15,7 @@ class RAGSystem:
         """Initializes both the parser engine and the persistent SQLite database layer."""
         # Initialize the parser class (handles extraction and threading)
         self.parser = MultiModalDocumentParser()
-        
+
         # Initialize the database manager (handles FTS5 BM25 index and queries)
         self.db = RAGDatabaseManager()
 
@@ -30,26 +31,31 @@ class RAGSystem:
 
         filename = path.name
         logger.info(f"📂 Reading file bytes into buffer: {filename}")
-        
+
         try:
             # 1. Read file as bytes (simulating a Streamlit upload widget buffer)
             with open(path, "rb") as f:
                 file_bytes = f.read()
 
             # 2. Extract layout-mapped text, tables, and images
-            extracted_chunks = self.parser.parse_file(file_bytes=file_bytes, filename=filename)
+            extracted_chunks = self.parser.parse_file(
+                file_bytes=file_bytes, filename=filename)
 
             if not extracted_chunks:
-                logger.warning(f"⚠️ No structural content extracted from '{filename}'.")
+                logger.warning(
+                    f"⚠️ No structural content extracted from '{filename}'.")
                 return False
 
             # 3. Store chunks and multi-modal asset references to the DB
-            self.db.insert_document_chunks(chunks=extracted_chunks, filename=filename)
-            print(f"\n🎉 SUCCESS: Successfully indexed '{filename}' ({len(extracted_chunks)} chunks).")
+            self.db.insert_document_chunks(
+                chunks=extracted_chunks, filename=filename)
+            print(
+                f"\n🎉 SUCCESS: Successfully indexed '{filename}' ({len(extracted_chunks)} chunks).")
             return True
 
         except Exception as e:
-            logger.error(f"💥 Failed to complete ingestion pipeline for '{filename}': {str(e)}", exc_info=True)
+            logger.error(
+                f"💥 Failed to complete ingestion pipeline for '{filename}': {str(e)}", exc_info=True)
             return False
 
     def search(self, query: str, top_n: int = 3):
@@ -68,15 +74,18 @@ class RAGSystem:
             return
 
         for idx, match in enumerate(matches):
-            print(f"\n[MATCH {idx+1}] (Score: {match['score']:.4f}) From File: {match['filename']}")
+            print(
+                f"\n[MATCH {idx+1}] (Score: {match['score']:.4f}) From File: {match['filename']}")
             print(f"📄 TEXT SNIPPET:\n{match['text']}")
-            
+
             # Highlight linked multi-modal components if present
             if match['table_path']:
-                print(f"📊 ASSOCIATED EXPORTED TABLE (CSV): {match['table_path']}")
+                print(
+                    f"📊 ASSOCIATED EXPORTED TABLE (CSV): {match['table_path']}")
             if match['image_path']:
-                print(f"🖼️ ASSOCIATED EXPORTED IMAGE (PNG): {match['image_path']}")
-                
+                print(
+                    f"🖼️ ASSOCIATED EXPORTED IMAGE (PNG): {match['image_path']}")
+
             print("-" * 50)
 
     def clear_system(self):
@@ -107,6 +116,6 @@ if __name__ == "__main__":
         # sample_query = "alexnet convolutional networks layer design specifications"
         sample_query = "Explain tensor with example from the book"
         rag_engine.search(query=sample_query, top_n=2)
-        
+
     else:
         print(f"❌ Test aborted: Please update 'target_document' to point to a valid file path.")
