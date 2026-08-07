@@ -3,3 +3,4 @@ launch.json
 __pycache__
 processed_data  
 .venv
+temp_upload_directory

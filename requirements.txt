@@ -25,6 +25,7 @@ torchaudio
 # 3. BACKEND, ROUTING, & EMBEDDING ORCHESTRATION
 # =====================================================================
 fastapi
+cryptography>=3.1
 uvicorn
 python-dotenv
 pydantic
@@ -35,7 +36,7 @@ langchain-huggingface>=0.0.1
 langchain_ollama
 # Deeply tied to torch; will pull CPU or GPU binaries depending on index unlocked above
 sentence-transformers
-
+sqlalchemy-utils
 
 # =====================================================================
 # 4. MULTI-MODAL CONTENT INGESTION & SLICING MATRIX
