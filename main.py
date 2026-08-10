@@ -115,36 +115,65 @@ def process_batch_ingestion(
     file_batch: list[dict],
     chunk_size: int,
     chunk_overlap: int,
-    db: Annotated[Session, Depends(get_db)],
 ):
-    # Open a fresh DB session for the background thread
+    # Create an independent DB session specifically for the background thread
+    db = SessionLocal()
 
     try:
         total_files = len(file_batch)
+        if total_files == 0:
+            return
+
+        file_weight = 90.0 / total_files
 
         for idx, file_info in enumerate(file_batch, start=1):
             file_path = file_info["path"]
             filename = file_info["filename"]
+            file_base_progress = (idx - 1) * file_weight
+
+            # Define progress callback passed down into parser & embedder
+            def update_job_progress(sub_step_desc: str, sub_percent: float):
+                """
+                sub_percent: Float from 0.0 to 1.0 within the current file
+                """
+                calculated_pct = int(file_base_progress + (file_weight * sub_percent))
+                job = (
+                    db.query(IngestionJob).filter(IngestionJob.job_id == job_id).first()
+                )
+                if job:
+                    job.step = f"[{idx}/{total_files}] {filename}: {sub_step_desc}"
+                    job.progress = calculated_pct
+                    db.commit()
+
             try:
+                # Step A: Reading file
+                update_job_progress("Reading file...", 0.05)
+
                 with open(file_path, "rb") as f:
                     file_bytes = f.read()
 
-                # Pass chunk parameters into your parser
+                # Step B: Parse file with live updates (e.g. per page or row)
                 chunks = parser_engine.parse_file(
                     file_bytes,
                     filename,
-                    db=db,
                     chunk_size=chunk_size,
                     chunk_overlap=chunk_overlap,
+                    on_progress=lambda desc, pct: update_job_progress(
+                        f"Parsing - {desc}", 0.05 + (pct * 0.45)
+                    ),
                 )
 
+                # Step C: Generate Embeddings & DB Insert with live updates
                 if chunks:
-                    # Atomic database insertion
-                    db_engine.insert_document_chunks(chunks, filename)
-                    logger.info(f"Finished background indexing for {filename}")
+                    db_engine.insert_document_chunks(
+                        chunks,
+                        filename,
+                        on_progress=lambda desc, pct: update_job_progress(
+                            f"Vectorizing - {desc}", 0.50 + (pct * 0.45)
+                        ),
+                    )
 
             except Exception as e:
-                logger.error(f"Failed background task for {filename}: {e!s}")
                 job = (
                     db.query(IngestionJob).filter(IngestionJob.job_id == job_id).first()
                 )
@@ -152,26 +181,15 @@ def process_batch_ingestion(
                     job.status = "failed"
                     job.error_message = str(e)
                     db.commit()
+                return
 
             finally:
-                # Always clean up temporary file from disk when done
                 if os.path.exists(file_path):
                     os.remove(file_path)
 
-            # Dynamically calculate progress %
-            progress_pct = int((idx / total_files) * 90)  # Reserve 100% for final step
+            update_job_progress("File fully indexed", 1.0)
 
-            job = db.query(IngestionJob).filter(IngestionJob.job_id == job_id).first()
-            if job:
-                job.step = f"Processed {idx}/{total_files} files: {filename}"
-                job.progress = progress_pct
-                db.commit()
-
-            # Clean up temp file
-            if os.path.exists(file_path):
-                os.remove(file_path)
-
-        # ALL FILES PROCESSED SUCCESSFULLY -> Set to Completed
+        # Final step: Completed
         job = db.query(IngestionJob).filter(IngestionJob.job_id == job_id).first()
         if job:
             job.status = "completed"
@@ -179,16 +197,8 @@ def process_batch_ingestion(
             job.progress = 100
             db.commit()
 
-    except Exception as e:
-        # db.rollback()
-        job = db.query(IngestionJob).filter(IngestionJob.job_id == job_id).first()
-        if job:
-            job.status = "failed"
-            job.error_message = str(e)
-            db.commit()
-
-    # finally:
-    #     db.close()
+    finally:
+        db.close()  # Clean up background session
 
 
 # 2. Ingestion Endpoint

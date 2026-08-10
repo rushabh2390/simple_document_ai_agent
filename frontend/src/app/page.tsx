@@ -75,6 +75,19 @@ function IngestionVault({ wipeTrigger }: IngestionVaultProps) {
 
   // Poll Job Status API whenever an active jobId exists and job is not done
   useEffect(() => {
+    if (wipeTrigger > 0) {
+      setSelectedFiles([]);
+      setCurrentJobId(null);
+      setJobStatus(null);
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }, [wipeTrigger]);
+
+  // Poll Job Status API every 3 seconds until progress reaching 100% or completion/failure
+  useEffect(() => {
     if (!currentJobId) return;
 
     const pollInterval = setInterval(async () => {
@@ -85,15 +98,19 @@ function IngestionVault({ wipeTrigger }: IngestionVaultProps) {
         );
         setJobStatus(res.data);
 
-        // Stop polling when job finishes
-        if (res.data.status === 'completed' || res.data.status === 'failed') {
+        // Stop polling when progress hits 100% or job completes / fails
+        if (
+          res.data.progress === 100 ||
+          res.data.status === 'completed' ||
+          res.data.status === 'failed'
+        ) {
           clearInterval(pollInterval);
           setIsUploading(false);
         }
       } catch (err) {
         console.error('Error fetching job status:', err);
       }
-    }, 1500);
+    }, 3000); // 3 seconds polling interval
 
     return () => clearInterval(pollInterval);
   }, [currentJobId]);
@@ -210,13 +227,12 @@ function IngestionVault({ wipeTrigger }: IngestionVaultProps) {
 
           <div className="w-full bg-slate-900 border border-slate-800 rounded-full h-2 overflow-hidden">
             <div
-              className={`h-full transition-all duration-300 ${
-                jobStatus.status === 'failed'
-                  ? 'bg-red-500'
-                  : jobStatus.status === 'completed'
+              className={`h-full transition-all duration-300 ${jobStatus.status === 'failed'
+                ? 'bg-red-500'
+                : jobStatus.status === 'completed'
                   ? 'bg-emerald-500'
                   : 'bg-emerald-400'
-              }`}
+                }`}
               style={{ width: `${jobStatus.progress}%` }}
             />
           </div>
@@ -237,8 +253,8 @@ function IngestionVault({ wipeTrigger }: IngestionVaultProps) {
                   jobStatus.status === 'failed'
                     ? 'text-red-400'
                     : jobStatus.status === 'completed'
-                    ? 'text-emerald-400'
-                    : 'text-slate-300'
+                      ? 'text-emerald-400'
+                      : 'text-slate-300'
                 }
               >
                 {jobStatus.step}
@@ -330,7 +346,7 @@ export default function Dashboard() {
       {/* Main Grid: 12 Columns */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Section (8 Cols) */}
-        <div className="lg:col-span-8 flex flex-col gap-6">
+        <div className="lg:col-span-10 flex flex-col gap-6">
 
           {/* Row 1: Side-by-Side Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -349,11 +365,10 @@ export default function Dashboard() {
                   messages.map((m, i) => (
                     <div
                       key={i}
-                      className={`p-2.5 rounded text-xs ${
-                        m.role === 'user'
-                          ? 'bg-emerald-950/40 border border-emerald-800/40 text-emerald-200 ml-4'
-                          : 'bg-slate-900 border border-slate-800 text-slate-300 mr-4'
-                      }`}
+                      className={`p-2.5 rounded text-xs ${m.role === 'user'
+                        ? 'bg-emerald-950/40 border border-emerald-800/40 text-emerald-200 ml-4'
+                        : 'bg-slate-900 border border-slate-800 text-slate-300 mr-4'
+                        }`}
                     >
                       {m.role === 'user' ? (
                         <span className="whitespace-pre-wrap">{m.content}</span>
@@ -437,7 +452,7 @@ export default function Dashboard() {
         </div>
 
         {/* Right Sidebar: Agent Settings (4 Cols) */}
-        <div className="lg:col-span-4 bg-[#161B22] border border-slate-800 rounded-lg p-5 flex flex-col justify-between h-full">
+        <div className="lg:col-span-2 bg-[#161B22] border border-slate-800 rounded-lg p-5 flex flex-col justify-between h-full">
           <div className="space-y-6">
             <div className="border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2 mb-1">
