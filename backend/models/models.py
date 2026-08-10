@@ -2,7 +2,7 @@ import datetime
 
 from sqlalchemy import Column, DateTime, Integer, String, Text
 
-from database.database import Base
+from ..database.database import Base
 
 
 class DocumentChunk(Base):

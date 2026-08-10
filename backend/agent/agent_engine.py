@@ -6,8 +6,8 @@ from langchain_core.runnables import RunnableConfig
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, MessagesState, StateGraph
 
-from config.config import settings
-from database.database_manager import query_tabular_database, search_knowledge_base
+from ..config.config import settings
+from ..database.database_manager import query_tabular_database, search_knowledge_base
 
 
 def retrieve_from_db(state: MessagesState, config: RunnableConfig = {}):

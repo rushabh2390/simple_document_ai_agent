@@ -1,0 +1,5 @@
+curl -X "POST" ^
+  "http://localhost:8000/vault/ingest-mixed?chunk_size=1000&chunk_overlap=200" ^
+  -H "accept: application/json" ^
+  -H "Content-Type: multipart/form-data" ^
+  -F "files=@M:\GWP-Packaging-FEFCO-Catalogue.pdf"

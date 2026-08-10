@@ -8,8 +8,8 @@ import pandas as pd
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
-from config.config import logger, settings
-from database.database import Base, engine
+from ..config.config import logger, settings
+from ..database.database import Base, engine
 
 STOP_WORDS = {
     "a",

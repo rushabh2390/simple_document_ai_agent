@@ -20,8 +20,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader, PdfWriter
 from sqlalchemy.orm import Session
 
-from config.config import logger
-from database.database import get_db
+from ..config.config import logger
+from ..database.database import get_db
 
 
 class MultiModalDocumentParser:

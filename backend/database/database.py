@@ -3,7 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy_utils import create_database, database_exists
 
-from config.config import settings
+from ..config.config import settings
 
 # Initialize SQLAlchemy engine using configured URI
 engine = create_engine(settings.DATABASE_URL, connect_args={"check_same_thread": False})
