@@ -1,19 +1,23 @@
-#!/bin/sh
+﻿#!/bin/sh
 
-# Start Ollama server process in the background
+# 1. Start Ollama server in background
 ollama serve &
 
-# Wait for the Ollama daemon port to open and respond
+# 2. Wait until Ollama engine is responsive
 echo "Waiting for Ollama service boot sequence..."
-while ! nc -z localhost 11434; do   
-  sleep 1
+until ollama list > /dev/null 2>&1; do
+  sleep 2
 done
 echo "Ollama core engine online!"
 
-# FIX: Auto-download deepseek-r1:1.5b instead of llama3.2
-echo "Pulling deepseek-r1:1.5b manifest layers..."
-ollama pull deepseek-r1:1.5b
-echo "Model initialization complete!"
+# 3. Download model only if it does NOT exist locally
+if ! ollama list | grep -q "qwen2.5-coder:3b"; then
+  echo "Pulling qwen2.5-coder:3b model (this may take a few minutes)..."
+  ollama pull qwen2.5-coder:3b
+  echo "Model initialization complete!"
+else
+  echo "Model qwen2.5-coder:3b already downloaded and ready."
+fi
 
-# Bring the background server process to the foreground so the container stays alive
+# 4. Keep container running
 wait

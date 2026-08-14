@@ -1,15 +1,16 @@
 import os
 import re
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from config.config import logger, settings
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 
-from ..config.config import logger, settings
-from ..database.database import Base, engine
+from db.database import Base, engine
 
 STOP_WORDS = {
     "a",
@@ -172,7 +173,12 @@ class RAGDatabaseManager:
         except Exception as e:
             logger.critical(f"💥 Failed to initialize native database: {e!s}")
 
-    def insert_document_chunks(self, chunks: list[dict[str, Any]], filename: str):
+    def insert_document_chunks(
+        self,
+        chunks: list[dict[str, Any]],
+        filename: str,
+        on_progress: Callable[[str, float], None] | None = None,
+    ):
         """Inserts a batch of multi-modal document chunks cleanly inside a single transaction."""
         if not chunks:
             return
@@ -291,16 +297,52 @@ class RAGDatabaseManager:
         return results
 
     def wipe_all_data(self):
-        """Clears all records instantly, resetting the database state."""
+        """Completely wipes all database structures including FTS shadow tables."""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM document_chunks;")
-                cursor.execute("DELETE FROM fts5_bm25_idx;")
-                conn.commit()
-            logger.info("🗑️ System Data Purge Complete.")
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # 1. Disable Foreign Keys
+            cursor.execute("PRAGMA foreign_keys = OFF;")
+
+            # 2. Explicitly drop the FTS virtual table first
+            # This prompts SQLite to dismantle the FTS5 module structures safely
+            cursor.execute("DROP TABLE IF EXISTS fts5_bm25_idx;")
+
+            # 3. Fetch ALL remaining user tables, views, and leftover shadow tables
+            cursor.execute("""
+                SELECT name, type FROM sqlite_master 
+                WHERE type IN ('table', 'view') 
+                AND name NOT LIKE 'sqlite_%';
+            """)
+            entities = cursor.fetchall()
+
+            # 4. Drop EVERY single table unconditionally (DO NOT skip shadow tables here)
+            for name, entity_type in entities:
+                if entity_type == "table":
+                    cursor.execute(f"DROP TABLE IF EXISTS {name};")
+                elif entity_type == "view":
+                    cursor.execute(f"DROP VIEW IF EXISTS {name};")
+
+            # 5. Clear sequence counters and commit
+            cursor.execute("DROP TABLE IF EXISTS sqlite_sequence;")
+            conn.commit()
+
+            # 6. Re-enable foreign keys and clear memory
+            cursor.execute("PRAGMA foreign_keys = ON;")
+            cursor.execute("VACUUM;")
+
+            # 7. Close THIS connection so init_db can open a clean one
+            conn.close()
+
+            # 8. Re-initialize database schema from scratch
+            self.init_db()
+
+            logger.info("🗑️ System Data Purge & Schema Reset Complete.")
+
         except Exception as e:
-            logger.error(f"❌ Error during native tables purge execution: {e!s}")
+            logger.error(f"❌ Error during database reset: {e!s}")
+            raise e
 
 
 @tool

@@ -1,0 +1,38 @@
+FROM python:3.11-slim
+
+# Prevent Python from writing bytecode and buffer logs for instant docker logs visibility
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Install system dependencies required for layout analysis, OCR, and document parsing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    poppler-utils \
+    tesseract-ocr \
+    libgeos-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch torchvision torchaudio
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source repository
+COPY . .
+
+# Ensure storage directories exist for SQLite DB, extracted tables, images, and temp uploads
+# RUN mkdir -p /app/processed_data /app/uploads
+
+EXPOSE 8000 8501
+
+# Default fallback command
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -3,3 +3,11 @@ __pycache__/
 *.db
 processed_data/
 .git/
+node_modules
+.next
+out
+build
+.env
+.env.local
+.git
+.gitignore

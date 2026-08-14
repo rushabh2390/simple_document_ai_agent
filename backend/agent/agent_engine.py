@@ -1,13 +1,12 @@
 import uuid
 from pathlib import Path
 
+from config.config import settings
+from db.database_manager import query_tabular_database, search_knowledge_base
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, MessagesState, StateGraph
-
-from ..config.config import settings
-from ..database.database_manager import query_tabular_database, search_knowledge_base
 
 
 def retrieve_from_db(state: MessagesState, config: RunnableConfig = {}):
@@ -107,7 +106,7 @@ def call_model(state: MessagesState, config: RunnableConfig = None):
 
     llm = ChatOllama(
         base_url=ollama_url,
-        model="deepseek-r1:1.5b",
+        model="qwen2.5-coder:3b",
         temperature=temperature,
         num_ctx=32768,
         num_predict=1024,

@@ -1,9 +1,11 @@
 import gc
 import io
+from collections.abc import Callable
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 import pandas as pd  # High-performance tabular data extraction
+from config.config import logger
 from docling.datamodel.base_models import DocumentStream, InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 
@@ -13,15 +15,11 @@ from docling.document_converter import (
     PdfFormatOption,
     WordFormatOption,
 )
-from fastapi import Depends
 
 # LangChain text splitters for high-fidelity Markdown chunking
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader, PdfWriter
 from sqlalchemy.orm import Session
-
-from ..config.config import logger
-from ..database.database import get_db
 
 
 class MultiModalDocumentParser:
@@ -29,7 +27,7 @@ class MultiModalDocumentParser:
         self,
         base_output_dir: str = "./processed_data",
         batch_size: int = 3,
-        tabular_db_path: str = "./processed_data/dynamic_tabular_data.db",
+        tabular_db_path: str = "./processed_data/rag_storage.db",
     ):
         """Initializes the multi-format document routing and processing engine."""
         self.base_dir = Path(base_output_dir)
@@ -62,9 +60,10 @@ class MultiModalDocumentParser:
         self,
         file_bytes: bytes,
         filename: str,
-        db: Annotated[Session, Depends(get_db)],
+        db: Session,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
+        on_progress: Callable[[str, float], None] | None = None,
     ) -> list[dict[str, Any]]:
         """
         Routes files dynamically based on extension. Tabular data gets dumped into SQLite
@@ -79,11 +78,18 @@ class MultiModalDocumentParser:
         markdown_segments = []
         table_paths = []
         image_paths = []
+
+        # Safe progress reporter helper
+        def notify_progress(step: str, pct: float):
+            if on_progress:
+                on_progress(step, min(max(pct, 0.0), 1.0))
+
         # =====================================================================
-        # ROUTE 1: TABULAR DATA PIPELINES (CSV & EXCEL) - TEXT-TO-SQL HYBRID
+        # ROUTE 1: TABULAR DATA PIPELINES (CSV & EXCEL)
         # =====================================================================
         if ext in [".csv", ".xlsx", ".xls"]:
             try:
+                notify_progress("Reading tabular file...", 0.2)
                 if ext == ".csv":
                     csv_text = file_bytes.decode("utf-8", errors="replace")
                     df = pd.read_csv(io.StringIO(csv_text))
@@ -94,33 +100,27 @@ class MultiModalDocumentParser:
                     logger.warning(f"⚠️ Tabular file {filename} is empty.")
                     return []
 
-                # Remove completely empty rows and columns to conserve database space
+                notify_progress("Cleaning columns and dataset...", 0.4)
                 df = df.dropna(how="all").dropna(axis=1, how="all")
-
-                # Clean column names for SQL safety (e.g. replace spaces and dashes with underscores)
                 df.columns = [
                     str(c).strip().replace(" ", "_").replace("-", "_").replace(".", "_")
                     for c in df.columns
                 ]
 
-                # 1. Store full dataset into local SQLite database for instant SQL querying
+                # 1. Store full dataset into local SQLite database
+                notify_progress("Writing to tabular SQL store...", 0.6)
                 table_name = f"tbl_{clean_name}"
                 with db.begin():
                     df.to_sql(
                         table_name, db.connection(), if_exists="replace", index=False
                     )
-                # conn = sqlite3.connect(str(self.tabular_db_path))
-                # df.to_sql(table_name, conn, if_exists="replace", index=False)
-                # conn.close()
-                logger.info(
-                    f"📊 Persisted {len(df)} rows into SQLite table: '{table_name}'"
-                )
 
-                # 2. Persist full CSV copy for Streamlit Inspector UI
+                # 2. Persist full CSV copy
                 csv_filepath = self.table_dir / f"table_{clean_name}_full.csv"
                 df.to_csv(csv_filepath, index=False)
 
-                # 3. Create a lightweight Schema Metadata Chunk (~150 tokens) for BM25 retrieval
+                # 3. Create schema chunk
+                notify_progress("Generating schema chunk...", 0.8)
                 columns_schema = []
                 for col in df.columns:
                     sample_vals = [
@@ -150,9 +150,7 @@ class MultiModalDocumentParser:
                     }
                 )
 
-                logger.info(
-                    f"✅ Tabular parsing complete. Schema chunk indexed for '{filename}'."
-                )
+                notify_progress("Tabular processing completed", 1.0)
                 return all_compiled_chunks
 
             except Exception as e:
@@ -175,8 +173,12 @@ class MultiModalDocumentParser:
 
                     for start_page in range(0, total_pages, self.batch_size):
                         end_page = min(start_page + self.batch_size, total_pages)
-                        logger.info(
-                            f" -> Safely parsing page window range [{start_page} to {end_page}]..."
+
+                        # Real-time PDF progress reporting per page batch (0.0 -> 0.8 scale)
+                        batch_pct = 0.8 * (end_page / total_pages)
+                        notify_progress(
+                            f"Parsing pages {start_page + 1}-{end_page}/{total_pages}",
+                            batch_pct,
                         )
 
                         writer = PdfWriter()
@@ -197,6 +199,7 @@ class MultiModalDocumentParser:
 
                             markdown_segments.append(doc.export_to_markdown())
 
+                            # Export Tables
                             for idx, element in enumerate(getattr(doc, "tables", [])):
                                 try:
                                     tdf = element.export_to_dataframe()
@@ -210,34 +213,23 @@ class MultiModalDocumentParser:
                                         f"⚠️ Skipping table export index {idx}: {t_err}"
                                     )
 
+                            # Export Pictures
                             for idx, element in enumerate(getattr(doc, "pictures", [])):
                                 try:
                                     if hasattr(element, "image") and element.image:
-                                        # 1. Retrieve the PIL Image object
                                         pil_img = None
                                         if hasattr(element, "get_image"):
-                                            pil_img = element.get_image(
-                                                doc
-                                            )  # Docling recommended method
+                                            pil_img = element.get_image(doc)
                                         elif hasattr(element.image, "pil_image"):
-                                            pil_img = (
-                                                element.image.pil_image
-                                            )  # Direct attribute access
+                                            pil_img = element.image.pil_image
 
-                                        # 2. Save only if a valid PIL image was found
                                         if pil_img:
                                             img_filename = f"image_{clean_name}_p{start_page}_{idx}.png"
                                             img_filepath = self.image_dir / img_filename
-
                                             pil_img.save(img_filepath, "PNG")
                                             image_paths.append(
                                                 str(img_filepath.resolve())
                                             )
-                                        else:
-                                            logger.warning(
-                                                f"⚠️ Skipping picture export index {idx}: No PIL image payload in ImageRef"
-                                            )
-
                                 except Exception as img_err:
                                     logger.warning(
                                         f"⚠️ Skipping picture export index {idx}: {img_err}"
@@ -263,6 +255,7 @@ class MultiModalDocumentParser:
         # =====================================================================
         elif ext in [".docx", ".txt", ".md"]:
             try:
+                notify_progress("Parsing text layout document...", 0.4)
                 if ext in [".txt", ".md"]:
                     text_content = file_bytes.decode("utf-8", errors="replace")
                     markdown_segments.append(text_content)
@@ -283,10 +276,12 @@ class MultiModalDocumentParser:
             return []
 
         # =====================================================================
-        # 3. CHUNKING & MULTIMEDIA MAPPING EXTENSION (For Text & PDF Docs)
+        # ROUTE 4: CHUNKING & MULTIMEDIA MAPPING (Text & PDF Docs)
         # =====================================================================
         if ext not in [".csv", ".xlsx", ".xls"] and markdown_segments:
+            notify_progress("Splitting document into chunks...", 0.85)
             full_markdown_content = "\n\n".join(markdown_segments)
+
             if full_markdown_content:
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=chunk_size,
@@ -322,7 +317,30 @@ class MultiModalDocumentParser:
                     )
 
         gc.collect()
+        notify_progress("Parsing complete", 1.0)
         logger.info(
             f"✅ Finished parsing workflow. Generated {len(all_compiled_chunks)} chunks for {filename}."
         )
         return all_compiled_chunks
+
+    def wipe_all_images_and_tables(self):
+        """Deletes all files inside the specified directory without removing subdirectories."""
+        try:
+            if self.image_dir.exists():
+                for item in self.image_dir.iterdir():
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+
+                logger.info(f"Cleared all files in: {self.image_dir}")
+            else:
+                logger.info(f"Directory {self.image_dir.exists()} does not exist.")
+            if self.table_dir.exists():
+                for item in self.table_dir.iterdir():
+                    if item.is_file() or item.is_symlink():
+                        item.unlink()
+
+                logger.info(f"Cleared all files in: {self.table_dir}")
+            else:
+                logger.info(f"Directory {self.table_dir.exists()} does not exist.")
+        except Exception as e:
+            logger.error(f"error occurred when tryingto delete image adn tables {e!s}")

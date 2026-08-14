@@ -1,30 +1,5 @@
 services:
-  # Automated local AI execution engine with NVIDIA GPU more then 4gb
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: ollama_service
-  #   ports:
-  #     - "11434:11434"
-  #   environment:
-  #     - OLLAMA_ORIGINS=*
-  #     - OLLAMA_NUM_PARALLEL=1       # Strictly limits concurrent streams
-  #     - OLLAMA_KEEP_ALIVE=5m        # Keeps the model cached in memory
-  #   volumes:
-  #     - ollama_storage:/root/.ollama
-  #     # Mount the entrypoint script into the container workspace
-  #     - ./entrypoint.sh:/entrypoint.sh
-  #   # Execute the script on startup to auto-download model matrices
-  #   entrypoint: ["/bin/sh", "/entrypoint.sh"]
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: all
-  #             capabilities: [gpu]
-  #   restart: unless-stopped
-
-  # Automated local AI execution engine with CPU
+  # # 1. Local AI execution engine (Ollama on CPU)
   ollama:
     image: ollama/ollama:latest
     container_name: ollama_service
@@ -37,24 +12,55 @@ services:
     volumes:
       - ollama_storage:/root/.ollama
       - ./entrypoint.sh:/entrypoint.sh
-    entrypoint: [ "/bin/sh", "/entrypoint.sh" ]
-    # REMOVED the deploy: resources: reservations: devices: driver: nvidia block
+    # Copy to /tmp first to avoid locking the host-mounted file inode
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /entrypoint.sh > /tmp/entrypoint.sh && chmod +x /tmp/entrypoint.sh && /tmp/entrypoint.sh"]
     restart: unless-stopped
 
-  # Streamlit Presentation Interface Dashboard Layer
-  frontend_ui:
+  # 2. FastAPI Ingestion & Processing Backend Engine
+  backend_api:
     build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: streamlit_dashboard
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    container_name: backend
     ports:
-      - "8501:8501"
+      - "8000:8000"
+    extra_hosts:
+      # Maps host.docker.internal to host's gateway IP inside the container
+      - "host.docker.internal:host-gateway"
     environment:
-      - OLLAMA_BASE_URL=http://ollama_service:11434
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - DATABASE_URL=sqlite:////app/processed_data/rag_storage.db
+      - TEMP_UPLOAD_DIR=/app/temp_upload_directory
+      - STATIC_ASSET_DIR=/app/processed_data
+      - PYTHONPATH=/app
+      - TORCHDYNAMO_DISABLE=1
+      - TORCH_LOGS=-all
+      - PYTHONWARNINGS=ignore
+      - TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
     volumes:
-      - ./processed_data:/app/processed_data # Keeps your SQLite RAG database local and viewable
+      - ./processed_data:/app/processed_data
+      - ./temp_upload_directory:/app/temp_upload_directory
     depends_on:
       - ollama
+    restart: unless-stopped
+
+  # 3. Next.js Web Frontend UI
+  frontend_ui:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+      args:
+        - BACKEND_PUBLIC_API_URL=http://localhost:8000
+    container_name: frontend
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_BACKEND_API_URL=http://backend_api:8000
+      - BACKEND_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend_api
     restart: unless-stopped
 
 volumes:

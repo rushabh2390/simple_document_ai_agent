@@ -22,7 +22,7 @@ import {
   Loader2
 } from 'lucide-react';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = process.env.BACKEND_PUBLIC_API_URL || "http://localhost:8000";
 
 interface Message {
   role: 'user' | 'assistant';
@@ -110,7 +110,7 @@ function IngestionVault({ wipeTrigger }: IngestionVaultProps) {
       } catch (err) {
         console.error('Error fetching job status:', err);
       }
-    }, 3000); // 3 seconds polling interval
+    }, 5000); // 5 seconds polling interval
 
     return () => clearInterval(pollInterval);
   }, [currentJobId]);
@@ -324,8 +324,9 @@ export default function Dashboard() {
   const handleWipeData = async () => {
     if (!confirm('Are you sure you want to wipe all knowledge base data?')) return;
     try {
-      await axios.post(`${API_BASE_URL}/job/clear`);
+      await axios.post(`${API_BASE_URL}/vault/clear`);
       setInspectedNodes([]);
+      setMessages([]);
       setWipeTrigger((prev) => prev + 1); // Trigger full reset in IngestionVault
       alert('Knowledge base cleared successfully.');
     } catch {

@@ -1,20 +1,12 @@
 # =====================================================================
-# 1. OPTIONAL HARDWARE SPECIFIC INDEX LOOKUPS
+# 1. HARDWARE SPECIFIC INDEX LOOKUP (CPU ONLY)
 # =====================================================================
-# Uncomment ONLY ONE of the lines below based on your target system architecture:
-
-# --- For NVIDIA CUDA 12.1 (Modern GPU Acceleration) ---
-# --extra-index-url https://download.pytorch.org/whl/cu121
-
-# --- For NVIDIA CUDA 12.6 / 12.4+ (Latest GPU Architectures) ---
-# --extra-index-url https://download.pytorch.org/whl/cu124
-
-# --- For CPU-Only Environments (Safe Legacy/DDR3 Framework Fallback) ---
-# --extra-index-url https://download.pytorch.org/whl/cpu
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
 
 
 # =====================================================================
-# 2. CORE MACHINE LEARNING FRAMEWORKS (Torch will map to the index above)
+# 2. CORE MACHINE LEARNING FRAMEWORKS
 # =====================================================================
 torch
 torchvision
@@ -34,7 +26,6 @@ langchain-community
 langchain-chroma
 langchain-huggingface>=0.0.1
 langchain_ollama
-# Deeply tied to torch; will pull CPU or GPU binaries depending on index unlocked above
 sentence-transformers
 sqlalchemy-utils
 

@@ -6,12 +6,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from agent_engine import agent_app  # Import our LangGraph engine
+from db.database_manager import RAGDatabaseManager
 
 # Import core modular modules
 from documents.document_parser import MultiModalDocumentParser
 from dotenv import load_dotenv
-
-from database.database_manager import RAGDatabaseManager
 
 
 def clean_deepseek_response(text: str) -> str:
@@ -186,64 +185,57 @@ with main_left:
 
             status_placeholder = st.empty()
 
-            with status_placeholder.container():
-                with st.status(
-                    "🧠 Agent Evaluating & Planning...", expanded=True
-                ) as status:
-                    st.write("Initializing state nodes...")
+            with (
+                status_placeholder.container(),
+                st.status("🧠 Agent Evaluating & Planning...", expanded=True) as status,
+            ):
+                st.write("Initializing state nodes...")
 
-                    # Send ONLY clean, non-empty conversation turns to LangGraph
-                    langgraph_messages = []
-                    for m in st.session_state.chat_history:
-                        if m.get("content") and m["content"].strip():
-                            role_tag = "user" if m["role"] == "user" else "assistant"
-                            langgraph_messages.append((role_tag, m["content"]))
+                # Send ONLY clean, non-empty conversation turns to LangGraph
+                langgraph_messages = []
+                for m in st.session_state.chat_history:
+                    if m.get("content") and m["content"].strip():
+                        role_tag = "user" if m["role"] == "user" else "assistant"
+                        langgraph_messages.append((role_tag, m["content"]))
 
-                    node_holder = []
-                    agent_config = {
-                        "configurable": {
-                            "db_manager": db_engine,
-                            "retrieval_limit": st.session_state.get(
-                                "retrieval_k_slider", 3
-                            ),
-                            "ollama_base_url": ollama_base_url,
-                            "temperature": st.session_state.get("temp_slider", 0.1),
-                            "top_k": st.session_state.get("top_k_slider", 40),
-                            "shared_node_container": node_holder,
-                        }
+                node_holder = []
+                agent_config = {
+                    "configurable": {
+                        "db_manager": db_engine,
+                        "retrieval_limit": st.session_state.get(
+                            "retrieval_k_slider", 3
+                        ),
+                        "ollama_base_url": ollama_base_url,
+                        "temperature": st.session_state.get("temp_slider", 0.1),
+                        "top_k": st.session_state.get("top_k_slider", 40),
+                        "shared_node_container": node_holder,
                     }
+                }
 
-                    try:
-                        stream_generator = agent_app.stream(
-                            {"messages": langgraph_messages},
-                            config=agent_config,
-                            stream_mode="values",
-                        )
+                try:
+                    stream_generator = agent_app.stream(
+                        {"messages": langgraph_messages},
+                        config=agent_config,
+                        stream_mode="values",
+                    )
 
-                        final_state = None
-                        for market_chunk in stream_generator:
-                            final_state = market_chunk
-                            if market_chunk.get("messages"):
-                                last_msg = market_chunk["messages"][-1]
-                                if (
-                                    hasattr(last_msg, "tool_calls")
-                                    and last_msg.tool_calls
-                                ):
-                                    for tc in last_msg.tool_calls:
-                                        st.write(
-                                            f"⚙️ **Invoked Tool**: `{tc.get('name')}`"
-                                        )
+                    final_state = None
+                    for market_chunk in stream_generator:
+                        final_state = market_chunk
+                        if market_chunk.get("messages"):
+                            last_msg = market_chunk["messages"][-1]
+                            if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+                                for tc in last_msg.tool_calls:
+                                    st.write(f"⚙️ **Invoked Tool**: `{tc.get('name')}`")
 
-                            if node_holder:
-                                st.session_state.inspected_nodes = node_holder
+                        if node_holder:
+                            st.session_state.inspected_nodes = node_holder
 
-                        status.update(
-                            label="✅ Execution Path Complete", state="complete"
-                        )
-                    except Exception as e:
-                        logger.error(f"Error during agent execution: {e}")
-                        status.update(label="❌ Execution Failed", state="error")
-                        final_state = None
+                    status.update(label="✅ Execution Path Complete", state="complete")
+                except Exception as e:
+                    logger.error(f"Error during agent execution: {e}")
+                    status.update(label="❌ Execution Failed", state="error")
+                    final_state = None
 
             # Extract final response safely
             final_answer = extract_final_agent_response(final_state)
