@@ -1,106 +1,99 @@
-# 🤖 LangGraph Multimodal AI Agent Hub
+# 🤖 LangGraph Multimodal AI Agent Hub (FastAPI + Next.js)
 
-A localized, high-fidelity Multimodal RAG & Agent Platform optimized for technical documents, textbooks, and structured datasets. Built using **LangGraph state machines**, it parses complex files into layout-aware Markdown representations, extracts dynamic tabular context, and streams reasoning steps directly inside an interactive UI.
+A localized, high-fidelity Multimodal RAG & Agent Platform optimized for technical documents, textbooks, and structured datasets. Built using a decoupled microservice architecture with a **FastAPI (Uvicorn)** backend and an interactive **Next.js** frontend surface, it parses complex files into layout-aware Markdown representations, extracts dynamic tabular context, and streams real-time reasoning steps directly via Server-Sent Events (SSE).
 
 ---
 
 ## 🏗️ Architecture Blueprint
 
-* **Orchestrator:** Multi-step **LangGraph State Machine** managing retrieval and reasoning nodes.
+* **API & Business Engine:** **FastAPI** running on high-throughput **Uvicorn** workers, handling async REST endpoints, file ingestion, Pydantic v2 validations, and token streaming over SSE.
+* **Frontend Surface:** **Next.js (App Router)** built with React, Tailwind CSS, and Lucide icons, featuring real-time event-streaming chat interfaces and interactive asset rendering.
+* **Orchestrator:** Multi-step **LangGraph State Machine** managing retrieval, tool routing, and reasoning loops.
 * **Document Parsing Engine:** Layout-aware multimodal document parser extracting structured text, dynamic tables, and visual diagram assets.
-* **Context & Asset Inspector:** Dual-pane Streamlit dashboard that displays extracted visual elements, CSV tables, and raw chunk contexts side-by-side with chat interactions.
-* **Localized LLM Engine:** Powered by local Ollama instances (compatible with `llama3.2`, `deepseek-r1`, etc.) with built-in monologue stripping (`<think>` tags) and privacy-first local boundaries.
+* **Vectorless Context Indexer:** Native SQLite FTS5 indexer using BM25 ranking for millisecond-fast context lookups without embedding compute overhead.
+* **Localized LLM Engine:** Powered by self-hosted Ollama containers (`llama3.2`, `deepseek-r1`) with built-in monologue stripping (`<think>` tags) and strict zero-data-leakage privacy boundaries.
 
 ---
 
-## 🎛️ UI & Features
+## 🎛️ Features & User Experience
 
-* **💬 Active Conversation Space:** Streamed agent execution updates (`st.status`) inline within the chat stream.
-* **🔍 Asset & Schema Inspector:** Instant rendering of extracted tabular CSV dataframes and diagram images retrieved during tool execution.
-* **📂 Ingestion Vault:** Multi-format uploader supporting `PDF`, `DOCX`, `XLSX`, `CSV`, `MD`, and `TXT` files with dynamic chunking.
-* **⚙️ Agent Settings:** Real-time adjustments for:
-  * Chunk Size & Overlap Parameters
-  * Retrieval Top-$K$ Windows
-  * Generation Temperature & Top-$K$ parameters
-  * One-click Index/Database Flushing
+* **💬 Live Token & Reasoning Stream:** Real-time agent status updates and text generation streamed via Server-Sent Events (SSE).
+* **🔍 Dual-Pane Asset Inspector:** Instant side-by-side rendering of extracted tabular CSV dataframes, visual diagrams, and raw document context chunks[cite: 2].
+* **📂 Multi-Format Ingestion Vault:** Upload support for `PDF`, `DOCX`, `XLSX`, `CSV`, `MD`, and `TXT` with dynamic chunking[cite: 2].
+* **⚙️ Dynamic Agent Tuning:** Live control over chunk size, overlap, retrieval Top-$K$ windows, temperature, and database flushing[cite: 2].
 
 ---
 
-## 🐳 Option 1: Running Fully Containerized (Using Docker)
+## 🐳 Option 1: Running Fully Containerized (Docker Compose)
 
-Use this method to run your database pipeline, application UI, and AI models fully self-contained inside isolated Docker environments.
+Use this method to run your database pipeline, FastAPI backend, Next.js UI, and Ollama engine inside isolated Docker environments[cite: 2].
 
 ### Step 1: Ensure Prerequisites are Met
-1. Install [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/).
-2. Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) if utilizing an active discrete GPU layout.
+1. Install [Docker Desktop for Windows/Linux](https://docs.docker.com/desktop/)[cite: 2].
+2. Install the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) if utilizing GPU acceleration[cite: 2].
 
-### Step 2: Configure Application Files
-Ensure your project contains a standard default `Dockerfile` and your revised `docker-compose.yml`.
+### Step 2: Spin Up Infrastructure
+Open your terminal in the project root directory and run[cite: 2]:
 
-### Step 3: Spin Up Infrastructure
-Open your terminal inside the `D:\simple_agent` root workspace directory and execute:
 ```powershell
 # Bring down existing containers and clean stale references
 docker compose down
 
-# Force rebuild application layers and boot detached containers
+# Force rebuild application layers and boot containers in detached mode
 docker compose up --build -d
 ```
-### Step 4: Validate Download Matrix
-The background engine will execute entrypoint.sh automatically to fetch your parameters. Watch the live download layer stream using:
+### Step 3: Validate Engine Initialisation
+Watch the live model pulling and entrypoint execution via logs.
 ```powershell
 docker logs -f ollama_service
 ```
-Once the terminal outputs Model initialization complete!, navigate your web browser to http://localhost:8501 to access your dashboard interface.
+Once initialization is complete, access your services at:
 
-## 💻 Option 2: Running Locally
-Use this option to run the Python application scripts and Ollama directly on your host machine bare-metal, bypassing Docker entirely.
+Next.js Web Dashboard: http://localhost:3000
 
-### Step 1: Install and Run Ollama Locally on Windows
-1. Download the official native installer: Ollama for Windows Installer.
+FastAPI Swagger Docs: http://localhost:8000/docs
 
-2. Run the executable file (OllamaSetup.exe) and proceed through the basic wizard layout steps.
+## 💻 Option 2: Running Locally (Bare Metal)
+Use this option to run the FastAPI backend, Next.js frontend, and Ollama engine natively on your host machine.
 
-3. Once fully installed, verify that the application background engine daemon is running (look for the Ollama icon in your Windows taskbar tray).
+### Step 1: Install & Boot Local Ollama Engine
+1. Install Ollama for Windows/Linux.
 
-4. Open a fresh PowerShell window on your host computer and pull the llama3.2 model parameters into your local storage matrix:
-
-```powershell 
+2. Open a terminal window and pull the required model
+```powershell
 ollama pull llama3.2
 ```
-5. Test that the local engine responds instantly by issuing a quick verification query:
-```powershell
-ollama run llama3.2 "Say hello!"
-```
-
-### Step 2: Set Up Local Python Virtual Environment
-Open a dedicated terminal (cmd or PowerShell or teminal based on os) and went to this project directory
-``` powershell
-# 1. Initialize a localized clean Python environment isolation block
+### Step 2: Set Up & Launch FastAPI Backend (Uvicorn)
+Open a terminal inside the /backend directory
+```PowerShell
+# 1. Initialize Python virtual environment
 python -m venv .venv
 
-# 2. Activate the workspace scope window state
-# On PowerShell:
+# 2. Activate environment
+# PowerShell:
 .\.venv\Scripts\Activate.ps1
-# On classic Command Prompt (CMD):
-.\.venv\Scripts\activate.bat
+# CMD / Bash:
+source .venv/bin/activate
 
-# 3. Upgrade basic pip installer layers
-python -m pip install --upgrade pip
-
-# 4. Install standard layout framework packages and dependencies
+# 3. Upgrade pip & install dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
-```
-### Step 3: Configure Environment Routing Variables
-Tell your local code application to look at your native Windows machine engine loop instead of network container clusters. Create or update your local .env configuration file inside
-```
-OLLAMA_BASE_URL=http://localhost:11434
-```
-### Step 4: Boot the Streamlit UI Dashboard Interface
-With your virtual environment activated, boot up your presentation interface from the command line:
-```powershell
-streamlit run app_ui.py
-```
-Your system will automatically launch a secure local host browser tab running at http://localhost:8501. You can now modify document parsing variables, clear underlying cache partitions, and verify text lookups natively without container virtualization delays.
 
-![Running Video](simple_agent_demo.gif)
+# 4. Start Uvicorn development server
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+The FastAPI backend server will be running live at http://localhost:8000.
+
+### Step 3: Set Up & Launch Next.js Frontend
+Open a separate terminal inside the /frontend directory:
+```PowerShell
+# 1. Install Node modules
+npm install
+
+# 2. Set environment variables (.env.local)
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+
+# 3. Start Next.js development server
+npm run dev
+```
+Navigate your browser to http://localhost:3000 to access the interactive dashboard.
