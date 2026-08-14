@@ -11,7 +11,7 @@ A localized, high-fidelity Multimodal RAG & Agent Platform optimized for technic
 * **Orchestrator:** Multi-step **LangGraph State Machine** managing retrieval, tool routing, and reasoning loops.
 * **Document Parsing Engine:** Layout-aware multimodal document parser extracting structured text, dynamic tables, and visual diagram assets.
 * **Vectorless Context Indexer:** Native SQLite FTS5 indexer using BM25 ranking for millisecond-fast context lookups without embedding compute overhead.
-* **Localized LLM Engine:** Powered by self-hosted Ollama containers (`llama3.2`, `deepseek-r1`) with built-in monologue stripping (`<think>` tags) and strict zero-data-leakage privacy boundaries.
+* **Localized LLM Engine:** Powered by self-hosted Ollama containers (`llama3.2`, `qwen2.5-coder:3b`) with built-in monologue stripping (`<think>` tags) and strict zero-data-leakage privacy boundaries.
 
 ---
 
