@@ -97,3 +97,4 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 npm run dev
 ```
 Navigate your browser to http://localhost:3000 to access the interactive dashboard.
+![Running Video](simple_agent_demo.gif)
