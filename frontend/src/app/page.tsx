@@ -297,25 +297,78 @@ export default function Dashboard() {
 
     const userMsg = inputQuery;
     setInputQuery('');
-    setMessages((prev) => [...prev, { role: 'user', content: userMsg }]);
+    
+    // Add user query and append placeholder assistant entry
+    setMessages((prev) => [
+      ...prev,
+      { role: 'user', content: userMsg },
+      { role: 'assistant', content: '' },
+    ]);
     setIsLoading(true);
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/vault/chat`, {
-        messages: [{ role: 'user', content: userMsg }],
-        retrieval_k: retrievalK,
-        temperature: temperature,
-        top_k: topK,
+      const response = await fetch(`${API_BASE_URL}/vault/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: userMsg }],
+          retrieval_k: retrievalK,
+          temperature: temperature,
+          top_k: topK,
+        }),
       });
 
-      const { content, inspected_nodes } = response.data;
-      setMessages((prev) => [...prev, { role: 'assistant', content }]);
-      if (inspected_nodes) setInspectedNodes(inspected_nodes);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: '❌ Connection error to agent service.' },
-      ]);
+      if (!response.ok || !response.body) {
+        throw new Error('Streaming connection failed');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || ''; // Keep incomplete lines in buffer
+
+        for (const line of lines) {
+          const trimmed = line.replace(/^data:\s*/, '').trim();
+          if (!trimmed || trimmed === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(trimmed);
+
+            if (parsed.type === 'content' && parsed.delta) {
+              setMessages((prev) => {
+                const newMsgs = [...prev];
+                const lastIdx = newMsgs.length - 1;
+                newMsgs[lastIdx] = {
+                  ...newMsgs[lastIdx],
+                  content: newMsgs[lastIdx].content + parsed.delta,
+                };
+                return newMsgs;
+              });
+            } else if (parsed.type === 'inspected_nodes' && parsed.nodes) {
+              setInspectedNodes(parsed.nodes);
+            }
+          } catch (e) {
+            console.error('Parsing stream chunk failed:', e);
+          }
+        }
+      }
+    } catch (err) {
+      setMessages((prev) => {
+        const newMsgs = [...prev];
+        const lastIdx = newMsgs.length - 1;
+        newMsgs[lastIdx] = {
+          role: 'assistant',
+          content: '❌ Connection error to agent service.',
+        };
+        return newMsgs;
+      });
     } finally {
       setIsLoading(false);
     }

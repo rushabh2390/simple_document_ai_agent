@@ -1,4 +1,5 @@
 import functools
+import json
 import os
 import re
 import sys
@@ -25,6 +26,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from models.models import IngestionJob
 from schemas.schemas import AgentChatRequest, JobResponse
@@ -352,7 +354,6 @@ async def ingest_mixed_files(
 
 @app.post("/vault/chat")
 async def chat_with_agent(payload: AgentChatRequest):
-    # Enforce strict agent instructions using a SystemMessage
     system_prompt = SystemMessage(
         content=(
             "You are an AI data analyst assistant. "
@@ -387,26 +388,40 @@ async def chat_with_agent(payload: AgentChatRequest):
         }
     }
 
-    try:
-        stream_generator = agent_app.stream(
-            {"messages": langgraph_messages}, config=agent_config, stream_mode="values"
-        )
+    async def event_generator():
+        try:
+            # Stream events using 'updates' or 'messages' mode
+            async for event in agent_app.astream_events(
+                {"messages": langgraph_messages}, config=agent_config, version="v2"
+            ):
+                kind = event["event"]
 
-        final_state = None
-        for chunk in stream_generator:
-            final_state = chunk
+                # Yield LLM streamed content tokens in real-time
+                if kind == "on_chat_model_stream":
+                    chunk_text = event["data"]["chunk"].content
+                    if chunk_text:
+                        # Output Server-Sent Events or plain JSON lines
+                        yield f"data: {json.dumps({'type': 'content', 'delta': chunk_text})}\n\n"
 
-        final_answer = extract_final_agent_response(final_state)
+            # Send inspect_nodes metadata block after execution finishes
+            if node_holder:
+                yield f"data: {json.dumps({'type': 'inspected_nodes', 'nodes': node_holder})}\n\n"
 
-        return {
-            "role": "assistant",
-            "content": final_answer,
-            "inspected_nodes": node_holder,
-        }
+            yield "data: [DONE]\n\n"
 
-    except Exception as e:
-        logger.error(f"Error during agent execution: {e!s}")
-        raise HTTPException(status_code=500, detail=f"Agent Execution Failed: {e!s}")
+        except Exception as e:
+            logger.error(f"Error during agent streaming: {e!s}")
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Prevents Nginx/proxy response buffering
+        },
+    )
 
 
 @app.post("/vault/clear", status_code=status.HTTP_200_OK)
