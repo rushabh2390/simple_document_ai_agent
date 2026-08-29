@@ -2,6 +2,7 @@ import functools
 import json
 import os
 import re
+import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -378,6 +379,8 @@ async def chat_with_agent(payload: AgentChatRequest):
 
     node_holder: list[dict[str, Any]] = []
     agent_config = {
+        "run_name": "Vault Agent Execution",
+        "tags": ["vault_chat", "rag"],
         "configurable": {
             "db_manager": db_engine,
             "retrieval_limit": payload.retrieval_k,
@@ -385,7 +388,7 @@ async def chat_with_agent(payload: AgentChatRequest):
             "temperature": payload.temperature,
             "top_k": payload.top_k,
             "shared_node_container": node_holder,
-        }
+        },
     }
 
     async def event_generator():
@@ -434,6 +437,31 @@ async def clear_database():
             os.remove(tabular_db_path)
         parser_engine.wipe_all_images_and_tables()
         db_engine.init_db()
+        target_dir = Path(settings.TEMP_UPLOAD_DIR)
+
+        if not target_dir.exists():
+            logger.warning(f"Directory {target_dir} does not exist. Creating it.")
+            target_dir.mkdir(parents=True, exist_ok=True)
+            return {"deleted_files": 0, "deleted_dirs": 0}
+
+        deleted_files = 0
+        deleted_dirs = 0
+
+        for item in target_dir.iterdir():
+            try:
+                if item.is_file() or item.is_symlink():
+                    item.unlink()
+                    deleted_files += 1
+                elif item.is_dir():
+                    shutil.rmtree(item)
+                    deleted_dirs += 1
+            except Exception as e:
+                logger.error(f"Failed to delete {item}: {e!s}")
+
+        logger.info(
+            f"Cleared {target_dir}: Removed {deleted_files} files and {deleted_dirs} directories."
+        )
+
         return {
             "status": "Success",
             "message": "All database and tabular states cleared successfully.",

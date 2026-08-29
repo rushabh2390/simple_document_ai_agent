@@ -9,15 +9,19 @@ from langchain_ollama import ChatOllama
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 
-def retrieve_from_db(state: MessagesState, config: RunnableConfig = {}):
+def retrieve_from_db(state: MessagesState, config: RunnableConfig = None):
     """
     FIRST NODE IN GRAPH:
-    Automatically queries the database (CSV SQL or PDF FTS5 chunks)
-    BEFORE sending context to the LLM agent.
+    - If CSV/Tabular data exists: Calls Ollama to inspect schema and generate a precise SQL query, then executes query_tabular_database.
+    - If PDF/Text document exists: Calls search_knowledge_base with BM25.
     """
+    config = config or {}
+    configurable = config.get("configurable", {})
+    ollama_url = configurable.get("ollama_base_url", "http://localhost:11434")
+
     messages = state["messages"]
 
-    # 1. Extract latest human user query
+    # 1. Extract latest user query
     user_query = ""
     for m in reversed(messages):
         if isinstance(m, HumanMessage):
@@ -30,28 +34,89 @@ def retrieve_from_db(state: MessagesState, config: RunnableConfig = {}):
     if not user_query:
         return {"messages": []}
 
-    # 2. Check if CSV / Tabular database exists on disk
+    # 2. Check if CSV/Tabular database exists
     tabular_db_path = Path(settings.STATIC_ASSET_DIR) / "dynamic_tabular_data.db"
     has_tabular_data = tabular_db_path.exists()
 
     tool_call_id = f"call_{uuid.uuid4().hex[:8]}"
 
-    # 3. Execute appropriate tool directly
+    # =====================================================================
+    # CASE A: TABULAR DATA (CSV / EXCEL)
+    # =====================================================================
     if has_tabular_data:
-        # For CSVs, run tabular query (or SELECT default)
-        sql_query = "SELECT * FROM tbl_data LIMIT 10"
-        retrieved_result = query_tabular_database.invoke(
-            {"sql_query": sql_query}, config=config
-        )
         tool_name = "query_tabular_database"
+
+        # Extract schema dynamically from SQLite
+        schema_info = ""
+        try:
+            conn = sqlite3.connect(tabular_db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+            )
+            tables = cursor.fetchall()
+
+            for tbl in tables:
+                t_name = tbl[0]
+                cursor.execute(f"PRAGMA table_info({t_name});")
+                cols = cursor.fetchall()
+                col_defs = [f"{c[1]} ({c[2]})" for c in cols]
+                schema_info += f"Table '{t_name}' columns: {', '.join(col_defs)}\n"
+
+            conn.close()
+        except Exception:
+            schema_info = "Table schema unreadable."
+
+        # Prompt Ollama to generate ONLY the raw SQL query
+        sql_generator_llm = ChatOllama(
+            base_url=ollama_url,
+            model="qwen2.5-coder:3b",
+            temperature=0.0,
+        )
+
+        sql_prompt = [
+            SystemMessage(
+                content=(
+                    "You are a SQL Expert.\n"
+                    "Given the SQLite database schema below and a user's prompt, generate ONLY a valid executable SQL query.\n\n"
+                    f"DATABASE SCHEMA:\n{schema_info}\n"
+                    "CRITICAL RULES:\n"
+                    "1. Respond ONLY with the raw SQL code inside a clean string. Do NOT use markdown tags (no ```sql), no explanation, no preamble.\n"
+                    "2. Make sure WHERE filters strictly match user query criteria (e.g., YEAR_ID = 2004 or YEAR_ID = '2004').\n"
+                    "3. Perform aggregations (SUM, AVG, COUNT, GROUP BY) when asked for totals, quarterlies, or summaries."
+                )
+            ),
+            HumanMessage(content=f"User request: {user_query}"),
+        ]
+
+        # Get generated SQL from Ollama
+        generated_sql_res = sql_generator_llm.invoke(sql_prompt, config=config)
+        generated_sql = (
+            generated_sql_res.content.strip()
+            .replace("```sql", "")
+            .replace("```", "")
+            .strip()
+        )
+
+        # Fallback safeguard if model output is empty
+        if not generated_sql.upper().startswith("SELECT"):
+            generated_sql = "SELECT * FROM tbl_data LIMIT 10"
+
+        # Execute generated SQL query via tool
+        retrieved_result = query_tabular_database.invoke(
+            {"sql_query": generated_sql}, config=config
+        )
+
+    # =====================================================================
+    # CASE B: UNSTRUCTURED DATA (PDF / DOCX / MD)
+    # =====================================================================
     else:
-        # For PDFs, execute FTS5 keyword search across document_chunks
+        tool_name = "search_knowledge_base"
         retrieved_result = search_knowledge_base.invoke(
             {"query": user_query}, config=config
         )
-        tool_name = "search_knowledge_base"
 
-    # 4. Attach retrieved DB context as a ToolMessage for the LLM
+    # Attach retrieved DB context as a ToolMessage for synthesis node
     tool_message = ToolMessage(
         content=retrieved_result,
         name=tool_name,

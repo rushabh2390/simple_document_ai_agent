@@ -37,6 +37,10 @@ services:
       - TORCH_LOGS=-all
       - PYTHONWARNINGS=ignore
       - TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-true}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-simple-document-ai-agent}
     volumes:
       - ./processed_data:/app/processed_data
       - ./temp_upload_directory:/app/temp_upload_directory

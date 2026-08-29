@@ -48,6 +48,12 @@ class Settings:
     STATIC_ASSET_DIR: str = str(STATIC_ASSET_PATH)
     TEMP_UPLOAD_DIR: str = str(TEMP_UPLOAD_PATH)
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2", "true")
+    LANGCHAIN_ENDPOINT = os.getenv(
+        "LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com"
+    )
+    LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY", "your-api-key")
+    LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT", "document-ai-agent")
 
     @property
     def DATABASE_URL(self) -> str:

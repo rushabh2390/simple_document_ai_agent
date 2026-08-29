@@ -64,6 +64,23 @@ Use this option to run the FastAPI backend, Next.js frontend, and Ollama engine 
 ollama pull llama3.2
 ```
 ### Step 2: Set Up & Launch FastAPI Backend (Uvicorn)
+---
+
+## 🔑 Environment Configuration (`.env`)
+
+Create a `.env` file in the root directory of the project to configure your environment variables, including optional **LangSmith** observability tracing:
+
+```env
+# Server Settings
+BACKEND_PUBLIC_API_URL=http://localhost:8000
+INTERNAL_BACKEND_API_URL=http://backend_api:8000
+
+# LangSmith Tracing & Observability (Optional)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_ENDPOINT=[https://api.smith.langchain.com](https://api.smith.langchain.com)
+LANGCHAIN_API_KEY=ls__your_langsmith_api_key_here
+LANGCHAIN_PROJECT=simple-document-ai-agent
+```
 Open a terminal inside the /backend directory
 ```PowerShell
 # 1. Initialize Python virtual environment

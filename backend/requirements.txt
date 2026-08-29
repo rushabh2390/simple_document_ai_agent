@@ -26,6 +26,7 @@ langchain-community
 langchain-chroma
 langchain-huggingface>=0.0.1
 langchain_ollama
+langsmith
 sentence-transformers
 sqlalchemy-utils
 
