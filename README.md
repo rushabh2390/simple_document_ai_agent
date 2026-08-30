@@ -2,6 +2,8 @@
 
 A localized, high-fidelity Multimodal RAG & Agent Platform optimized for technical documents, textbooks, and structured datasets. Built using a decoupled microservice architecture with a **FastAPI (Uvicorn)** backend and an interactive **Next.js** frontend surface, it parses complex files into layout-aware Markdown representations, extracts dynamic tabular context, and streams real-time reasoning steps directly via Server-Sent Events (SSE).
 
+**__Note__**: rushabh2390 and RddArihant are both my personal accounts
+
 ---
 
 ## 🏗️ Architecture Blueprint
