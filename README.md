@@ -117,3 +117,21 @@ npm run dev
 ```
 Navigate your browser to http://localhost:3000 to access the interactive dashboard.
 ![Running Video](simple_agent_demo.gif)
+
+## ⚡ Load Testing & Performance Benchmarks
+
+The full end-to-end local document AI execution pipeline (FastAPI + SQLite FTS5 + Ollama LLM) was stress-tested using **K6**.
+
+[![K6 Load Test Summary](./k6-report-summary.png)](k6-report-summary.png)
+> 🔗 **[Click here to view the Interactive Live HTML Dashboard](summary.html)**
+
+### Performance Summary
+
+| Metric | Result | Target / Standard |
+| :--- | :--- | :--- |
+| **HTTP Request Success Rate** | **100%** (0 errors) | Zero failed API calls |
+| **Total Workflows Completed** | **36 iterations** | Multi-stage load test run |
+| **Mean End-to-End Latency** | **17.96 seconds** | FTS5 search + Ollama inference pipeline |
+| **P90 Response Time** | **22.96 seconds** | 90% of requests resolved under 23s |
+| **P95 Response Time** | **24.48 seconds** | 95% of requests completed cleanly within 25s |
+| **Hardware Constraints** | **4 VUs (Max)** | Optimized for 16GB RAM / 4GB VRAM limits |

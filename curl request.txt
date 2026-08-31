@@ -3,3 +3,20 @@ curl -X "POST" ^
   -H "accept: application/json" ^
   -H "Content-Type: multipart/form-data" ^
   -F "files=@M:\GWP-Packaging-FEFCO-Catalogue.pdf"
+
+curl --url 'http://localhost:8000/vault/chat' \
+  -H 'Accept: */*' \
+  -H 'Accept-Language: en-GB,en;q=0.9' \
+  -H 'Connection: keep-alive' \
+  -H 'Content-Type: application/json' \
+  -H 'Origin: http://localhost:3000' \
+  -H 'Referer: http://localhost:3000/' \
+  -H 'Sec-Fetch-Dest: empty' \
+  -H 'Sec-Fetch-Mode: cors' \
+  -H 'Sec-Fetch-Site: same-site' \
+  -H 'Sec-GPC: 1' \
+  -H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36' \
+  -H 'sec-ch-ua: "Chromium";v="152", "Not?A_Brand";v="24", "Brave";v="152"' \
+  -H 'sec-ch-ua-mobile: ?0' \
+  -H 'sec-ch-ua-platform: "Windows"' \
+  --data-raw '{"messages":[{"role":"user","content":"give me quarterly sales report of year 2004 in table format."}],"retrieval_k":3,"temperature":0,"top_k":40}'
